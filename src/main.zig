@@ -25,10 +25,13 @@ pub fn main() !void {
     }
 
     const pid: u64 = std.os.linux.fork();
-    std.posix.execvpeZ(
-        &arguments[0][0],
-        &arguments,
-    );
+    if (pid == 0) {
+        try std.posix.execvpeZ(
+            &arguments[0][0],
+            &arguments,
+            null,
+        );
+    }
 
     // try stdout.print("Run `zig build test` to run the tests.\n", .{});
     //
