@@ -1,4 +1,5 @@
 const std = @import("std");
+const Args = @import("args.zig").Args;
 
 pub fn main() !void {
     // const stdout_file = std.io.getStdOut().writer();
@@ -16,21 +17,25 @@ pub fn main() !void {
     const input = try getInput(allocator);
     defer allocator.free(input);
 
-    const arguments = try sliceToArguments(input, allocator);
-    defer allocator.free(arguments);
-    defer for (arguments) |arg| allocator.free(arg);
+    const args: Args = try sliceToArguments(input, allocator);
+    defer args.deinit();
 
-    for (arguments) |arg| {
-        std.debug.print("|{any}|\n", .{arg});
-    }
+    // Get environment variables from std.os.environ
+    const environ = std.os.environ;
 
-    const pid: u64 = std.os.linux.fork();
+    const pid: std.os.linux.pid_t = @intCast(std.os.linux.fork());
+    var status: u32 = 0;
     if (pid == 0) {
         try std.posix.execvpeZ(
-            &arguments[0][0],
-            &arguments,
-            null,
+            args.args[0].?,
+            args.args,
+            std.os.environ[0..1 :null],
         );
+    } else {
+        _ = std.os.linux.waitpid(pid, &status, std.os.linux.W.UNTRACED);
+        while (!std.os.linux.W.IFEXITED(status) and !std.os.linux.W.IFSIGNALED(status)) {
+            _ = std.os.linux.waitpid(pid, &status, std.os.linux.W.UNTRACED);
+        }
     }
 
     // try stdout.print("Run `zig build test` to run the tests.\n", .{});
@@ -38,50 +43,18 @@ pub fn main() !void {
     // try bw.flush(); // don't forget to flush!
 }
 
-pub fn sliceToArguments(buffer: []u8, allocator: std.mem.Allocator) ![][]u8 {
-    //make this null terminated;
-    var arguments: ?[][]u8 = null;
-    errdefer if (arguments) |args| allocator.free(args);
+pub fn sliceToArguments(buffer: []u8, allocator: std.mem.Allocator) !Args {
+    var args: ?Args = null;
+    errdefer if (args) |*cArgs| cArgs.deinit();
 
     var start: u64 = 0;
     for (0..buffer.len) |i| {
         if (std.ascii.isWhitespace(buffer[i])) {
             if (i - start >= 1) {
-                //cut string
-                if (arguments) |args| {
-                    const length = i - start;
-                    const newArgument = try allocator.alloc(u8, length + 1);
-                    errdefer allocator.free(newArgument);
-
-                    newArgument[length] = 0;
-                    for (start..i) |j| {
-                        newArgument[j - start] = buffer[j];
-                    }
-
-                    const newArgs = try allocator.alloc([]u8, args.len + 1);
-
-                    newArgs[args.len] = newArgument;
-                    for (0..args.len) |j| {
-                        newArgs[j] = args[j];
-                    }
-
-                    allocator.free(args);
-
-                    arguments = newArgs;
+                if (args) |*cArgs| {
+                    try cArgs.addArg(buffer[start..i]);
                 } else {
-                    const length = i - start;
-                    const newArgument = try allocator.alloc(u8, length + 1);
-                    errdefer allocator.free(newArgument);
-
-                    newArgument[length] = 0;
-                    for (start..i) |j| {
-                        newArgument[j - start] = buffer[j];
-                    }
-
-                    const args = try allocator.alloc([]u8, 1);
-                    args[0] = newArgument;
-
-                    arguments = args;
+                    args = try Args.init(buffer[start..i], allocator);
                 }
             }
 
@@ -90,45 +63,15 @@ pub fn sliceToArguments(buffer: []u8, allocator: std.mem.Allocator) ![][]u8 {
     }
 
     if (buffer.len - start >= 1) {
-        if (arguments) |args| {
-            const length = buffer.len - start;
-            const newArgument = try allocator.alloc(u8, length + 1);
-            errdefer allocator.free(newArgument);
-
-            newArgument[length] = 0;
-            for (start..buffer.len) |j| {
-                newArgument[j - start] = buffer[j];
-            }
-
-            const newArgs = try allocator.alloc([]u8, args.len + 1);
-
-            newArgs[args.len] = newArgument;
-            for (0..args.len) |j| {
-                newArgs[j] = args[j];
-            }
-
-            allocator.free(args);
-
-            arguments = newArgs;
+        if (args) |*cArgs| {
+            try cArgs.addArg(buffer[start..buffer.len]);
         } else {
-            const length = buffer.len - start;
-            const newArgument = try allocator.alloc(u8, length + 1);
-            errdefer allocator.free(newArgument);
-
-            newArgument[length] = 0;
-            for (start..buffer.len) |j| {
-                newArgument[j - start] = buffer[j];
-            }
-
-            const args = try allocator.alloc([]u8, 1);
-            args[0] = newArgument;
-
-            arguments = args;
+            args = try Args.init(buffer[start..buffer.len], allocator);
         }
     }
 
-    if (arguments) |args| {
-        return args;
+    if (args) |cArgs| {
+        return cArgs;
     }
 
     return error.NoArguments;
