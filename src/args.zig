@@ -14,16 +14,22 @@ pub const Args = struct {
         newArgs[0] = newArgument;
         newArgs[1] = null;
 
-        return Args{ .args = newArgs[0..2 :null], .len = 2, .allocator = allocator };
+        return Args{ .args = newArgs[0..1 :null], .len = 2, .allocator = allocator };
     }
 
-    pub fn deinit(self: *Args) void {
-        for (0..self.len) |i| {
-            if (self.args[i]) |arg| {
-                self.allocator.free(arg);
+    pub fn deinit(self: *const Args) void {
+        for (self.args[0 .. self.len - 1]) |arg| {
+            if (arg) |cArg| {
+                var i: u64 = 0;
+                while (true) : (i += 1) {
+                    if (cArg[i] == 0) {
+                        break;
+                    }
+                }
+                self.allocator.free(cArg[0 .. i + 1]);
             }
         }
-        self.allocator.free(self.args);
+        self.allocator.free(self.args[0..self.len]);
     }
 
     pub fn addArg(self: *Args, arg: []u8) !void {
@@ -43,8 +49,8 @@ pub const Args = struct {
 
         self.deinit();
 
-        self.len += 1;
         self.args = newArgs[0..self.len :null];
+        self.len += 1;
     }
 
     pub fn print(self: *Args) void {

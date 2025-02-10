@@ -21,16 +21,13 @@ pub fn main() !void {
     defer args.deinit();
 
     // Get environment variables from std.os.environ
-    const environ = std.os.environ;
+    const environ = try getEnviron(allocator);
 
     const pid: std.os.linux.pid_t = @intCast(std.os.linux.fork());
     var status: u32 = 0;
     if (pid == 0) {
-        try std.posix.execvpeZ(
-            args.args[0].?,
-            args.args,
-            std.os.environ[0..1 :null],
-        );
+        const errors = std.posix.execvpeZ(args.args[0].?, args.args, environ);
+        std.debug.print("{any}\n", .{errors});
     } else {
         _ = std.os.linux.waitpid(pid, &status, std.os.linux.W.UNTRACED);
         while (!std.os.linux.W.IFEXITED(status) and !std.os.linux.W.IFSIGNALED(status)) {
@@ -41,6 +38,20 @@ pub fn main() !void {
     // try stdout.print("Run `zig build test` to run the tests.\n", .{});
     //
     // try bw.flush(); // don't forget to flush!
+}
+
+pub fn getEnviron(allocator: std.mem.Allocator) ![*:null]?[*:0]u8 {
+    const env = std.os.environ;
+
+    const envCpy = try allocator.alloc(?[*:0]u8, env.len + 1);
+
+    for (0..env.len) |i| {
+        envCpy[i] = env[i];
+    }
+
+    envCpy[env.len] = null;
+
+    return envCpy[0..env.len :null];
 }
 
 pub fn sliceToArguments(buffer: []u8, allocator: std.mem.Allocator) !Args {
