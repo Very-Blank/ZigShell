@@ -98,9 +98,7 @@ pub fn getInput(allocator: std.mem.Allocator) ![]u8 {
                     len = buffer.len;
 
                     const newBuffer = try allocator.alloc(u8, buffer.len + 50);
-                    for (0..buffer.len) |i| {
-                        newBuffer[i] = buffer[i];
-                    }
+                    @memcpy(newBuffer, buffer);
 
                     allocator.free(buffer);
                     buffer = newBuffer;
