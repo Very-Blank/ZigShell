@@ -1,5 +1,14 @@
 const std = @import("std");
 const Args = @import("args.zig").Args;
+const Environ = @import("environ.zig").Environ;
+
+// TODO:
+// add buildins! "cd" -> chdir(), to change process dir for the parent (shell),
+// "help",
+// "exit"
+
+// TODO:
+// maybe change to execvpeZ to execveZ and get the absolute path yourself?
 
 pub fn main() !void {
     // const stdout_file = std.io.getStdOut().writer();
@@ -21,37 +30,24 @@ pub fn main() !void {
     defer args.deinit();
 
     // Get environment variables from std.os.environ
-    const environ = try getEnviron(allocator);
+    const environ: Environ = try Environ.init(std.os.environ, allocator);
+    defer environ.deinit();
 
     const pid: std.os.linux.pid_t = @intCast(std.os.linux.fork());
     var status: u32 = 0;
     if (pid == 0) {
-        const errors = std.posix.execvpeZ(args.args[0].?, args.args, environ);
+        // NOTE: ALSO HERE!!
+        const errors = std.posix.execvpeZ(args.args[0].?, args.args, environ.variables);
         std.debug.print("{any}\n", .{errors});
+    } else if (pid < 0) {
+        return error.ForkFailed;
     } else {
+        // NOTE: READ MORE OF THE MAN PAGES FOR THESE
         _ = std.os.linux.waitpid(pid, &status, std.os.linux.W.UNTRACED);
         while (!std.os.linux.W.IFEXITED(status) and !std.os.linux.W.IFSIGNALED(status)) {
             _ = std.os.linux.waitpid(pid, &status, std.os.linux.W.UNTRACED);
         }
     }
-
-    // try stdout.print("Run `zig build test` to run the tests.\n", .{});
-    //
-    // try bw.flush(); // don't forget to flush!
-}
-
-pub fn getEnviron(allocator: std.mem.Allocator) ![*:null]?[*:0]u8 {
-    const env = std.os.environ;
-
-    const envCpy = try allocator.alloc(?[*:0]u8, env.len + 1);
-
-    for (0..env.len) |i| {
-        envCpy[i] = env[i];
-    }
-
-    envCpy[env.len] = null;
-
-    return envCpy[0..env.len :null];
 }
 
 pub fn sliceToArguments(buffer: []u8, allocator: std.mem.Allocator) !Args {

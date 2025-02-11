@@ -47,7 +47,7 @@ pub const Args = struct {
         newArgs[self.len - 1] = newArgument;
         newArgs[self.len] = null;
 
-        self.deinit();
+        self.allocator.free(self.args[0..self.len]);
 
         self.args = newArgs[0..self.len :null];
         self.len += 1;
