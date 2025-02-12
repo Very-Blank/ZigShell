@@ -52,6 +52,8 @@ pub fn main() !void {
         break;
     }
 
+    args.print();
+
     const pid: std.os.linux.pid_t = @intCast(std.os.linux.fork());
     var status: u32 = 0;
     if (pid == 0) {

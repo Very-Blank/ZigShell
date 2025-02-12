@@ -105,9 +105,12 @@ pub const Args = struct {
     }
 
     pub fn print(self: *const Args) void {
-        for (0..self.len) |i| {
-            if (self.args[i]) |cArg| {
-                std.debug.print("{s}\n", .{cArg});
+        if (self.args) |cArgs| {
+            std.debug.print("Args:\n", .{});
+            for (0..self.len) |i| {
+                if (cArgs[i]) |cArg| {
+                    std.debug.print("{any}. {s}\n", .{ i, cArg });
+                }
             }
         }
     }
