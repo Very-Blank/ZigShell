@@ -9,6 +9,9 @@ const Environ = @import("environ.zig").Environ;
 // "exit"
 
 // TODO:
+// fix line wrapping
+
+// TODO:
 // maybe change to execvpeZ to execveZ and get the absolute path yourself?
 
 pub fn main() !void {
