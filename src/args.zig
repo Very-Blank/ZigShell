@@ -1,5 +1,10 @@
 const std = @import("std");
 
+const ParseError = error{
+    QuoteDidNotEnd,
+    OutOfMemory,
+};
+
 pub const Args = struct {
     args: ?[*:null]?[*:0]u8,
     len: u64,
@@ -60,7 +65,7 @@ pub const Args = struct {
         }
     }
 
-    pub fn parse(self: *Args, buffer: []u8) !void {
+    pub fn parse(self: *Args, buffer: []u8) ParseError!void {
         // FIXME: change this if mess, use switch or something with states.
         // Also I kind of hate how you need an extra check at the end.
 
@@ -95,7 +100,7 @@ pub const Args = struct {
                 try self.add(buffer[start..buffer.len]);
             }
         } else {
-            return error.QuoteDidNotEnd;
+            return ParseError.QuoteDidNotEnd;
         }
     }
 

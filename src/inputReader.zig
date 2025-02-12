@@ -11,7 +11,7 @@ pub const InputReader = struct {
         };
     }
 
-    pub fn read(self: *InputReader) !void {
+    pub fn read(self: *InputReader, delimiter: u8) !void {
         var start: u64 = 0;
         var len: u64 = 0;
 
@@ -20,7 +20,7 @@ pub const InputReader = struct {
         if (self.buffer) |cBuffer| {
             start = cBuffer.len;
             const newBuffer = try self.allocator.alloc(u8, cBuffer.len + 50);
-            @memcpy(newBuffer, cBuffer);
+            @memcpy(newBuffer[0..cBuffer.len], cBuffer);
 
             buffer = newBuffer;
         } else {
@@ -35,7 +35,7 @@ pub const InputReader = struct {
             var fBStream = std.io.fixedBufferStream(buffer[start..buffer.len]);
             stdin.streamUntilDelimiter(
                 fBStream.writer(),
-                '\n',
+                delimiter,
                 buffer.len - start,
             ) catch |err| {
                 switch (err) {

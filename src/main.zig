@@ -27,17 +27,30 @@ pub fn main() !void {
     var inputReader = InputReader.init(allocator);
     defer inputReader.clear();
 
-    try inputReader.read();
-
     var args: Args = Args.init(allocator);
     defer args.clear();
 
-    try args.parse(
-        if (inputReader.buffer) |cBuffer| cBuffer else return error.NoArguments,
-    );
-
     const environ: Environ = try Environ.init(std.os.environ, allocator);
     defer environ.deinit();
+
+    var delimeter: u8 = '\n';
+    while (true) {
+        try inputReader.read(delimeter);
+
+        args.parse(
+            if (inputReader.buffer) |cBuffer| cBuffer else return error.NoArguments,
+        ) catch |err| {
+            switch (err) {
+                error.QuoteDidNotEnd => {
+                    delimeter = '"';
+                    continue;
+                },
+                else => return err,
+            }
+        };
+
+        break;
+    }
 
     const pid: std.os.linux.pid_t = @intCast(std.os.linux.fork());
     var status: u32 = 0;
