@@ -1,5 +1,6 @@
 const std = @import("std");
 const Args = @import("args.zig").Args;
+const InputReader = @import("inputReader.zig").InputReader;
 const Environ = @import("environ.zig").Environ;
 
 // TODO:
@@ -23,13 +24,18 @@ pub fn main() !void {
     _ = try stdout.write(" > ");
     // try bw.flush(); // don't forget to flush!
 
-    const input = try getInput(allocator);
-    defer allocator.free(input);
+    var inputReader = InputReader.init(allocator);
+    defer inputReader.clear();
 
-    const args: Args = try sliceToArguments(input, allocator);
-    defer args.deinit();
+    try inputReader.read();
 
-    // Get environment variables from std.os.environ
+    var args: Args = Args.init(allocator);
+    defer args.clear();
+
+    try args.parse(
+        if (inputReader.buffer) |cBuffer| cBuffer else return error.NoArguments,
+    );
+
     const environ: Environ = try Environ.init(std.os.environ, allocator);
     defer environ.deinit();
 
@@ -37,7 +43,7 @@ pub fn main() !void {
     var status: u32 = 0;
     if (pid == 0) {
         // NOTE: ALSO HERE!!
-        const errors = std.posix.execvpeZ(args.args[0].?, args.args, environ.variables);
+        const errors = std.posix.execvpeZ(args.args.?[0].?, args.args.?, environ.variables);
         std.debug.print("{any}\n", .{errors});
     } else if (pid < 0) {
         return error.ForkFailed;
@@ -48,86 +54,4 @@ pub fn main() !void {
             _ = std.os.linux.waitpid(pid, &status, std.os.linux.W.UNTRACED);
         }
     }
-}
-
-pub fn sliceToArguments(buffer: []u8, allocator: std.mem.Allocator) !Args {
-    var args: ?Args = null;
-    errdefer if (args) |*cArgs| cArgs.deinit();
-
-    var start: u64 = 0;
-    for (0..buffer.len) |i| {
-        if (std.ascii.isWhitespace(buffer[i])) {
-            if (i - start >= 1) {
-                if (args) |*cArgs| {
-                    try cArgs.addArg(buffer[start..i]);
-                } else {
-                    args = try Args.init(buffer[start..i], allocator);
-                }
-            }
-
-            start = i + 1;
-        }
-    }
-
-    if (buffer.len - start >= 1) {
-        if (args) |*cArgs| {
-            try cArgs.addArg(buffer[start..buffer.len]);
-        } else {
-            args = try Args.init(buffer[start..buffer.len], allocator);
-        }
-    }
-
-    if (args) |cArgs| {
-        return cArgs;
-    }
-
-    return error.NoArguments;
-}
-
-pub fn getInput(allocator: std.mem.Allocator) ![]u8 {
-    var buffer: []u8 = try allocator.alloc(u8, 50);
-    errdefer allocator.free(buffer);
-    const stdin = std.io.getStdIn().reader();
-
-    var start: u64 = 0;
-    var len: u64 = 0;
-
-    while (true) {
-        var fBStream = std.io.fixedBufferStream(buffer[start..buffer.len]);
-        stdin.streamUntilDelimiter(
-            fBStream.writer(),
-            '\n',
-            buffer.len - start,
-        ) catch |err| {
-            switch (err) {
-                error.StreamTooLong => {
-                    start = buffer.len;
-                    len = buffer.len;
-
-                    const newBuffer = try allocator.alloc(u8, buffer.len + 50);
-                    @memcpy(newBuffer, buffer);
-
-                    allocator.free(buffer);
-                    buffer = newBuffer;
-                },
-                else => {
-                    return err;
-                },
-            }
-            continue;
-        };
-
-        len += fBStream.getWritten().len;
-        break;
-    }
-
-    const newBuffer = try allocator.alloc(u8, len);
-    for (0..len) |i| {
-        newBuffer[i] = buffer[i];
-    }
-
-    allocator.free(buffer);
-    buffer = newBuffer;
-
-    return buffer;
 }
