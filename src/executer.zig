@@ -18,8 +18,7 @@ const ExecuteError = error{
     InvalidPath,
     PathWasNull,
     ForkFailed,
-    SystemResources,
-    Unexpected,
+    ChangeDirError,
 };
 
 pub const Executer = struct {
@@ -54,7 +53,7 @@ pub const Executer = struct {
                     if (args.len != 3) return error.InvalidPath;
                     const cPath = if (cArgs[1]) |value| value else return error.PathWasNull;
                     // FIXME: add print something if path doesn't exist.
-                    _ = std.os.linux.chdir(cPath);
+                    std.posix.chdir(ArrayHelper.cStrToSlice(cPath)) catch return error.ChangeDirError;
                     return;
                 },
                 .help => {
@@ -65,11 +64,11 @@ pub const Executer = struct {
             }
         }
 
-        const pid: std.posix.pid_t = @intCast(try std.posix.fork());
+        const pid: std.posix.pid_t = @intCast(std.posix.fork() catch return error.ForkFailed);
         if (pid == 0) {
 
             // NOTE: ALSO HERE!!
-            const errors = std.posix.execvpeZ(args.args.?[0].?, args.args.?, environ.variables);
+            const errors = std.posix.execvpeZ(cCommand, cArgs, environ.variables);
             std.debug.print("{any}\n", .{errors});
             return error.ChildExit;
             // std.os.linux.exit(-1);
