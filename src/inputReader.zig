@@ -44,7 +44,7 @@ pub const InputReader = struct {
                         len = buffer.len;
 
                         const newBuffer = try self.allocator.alloc(u8, buffer.len + 50);
-                        @memcpy(newBuffer, buffer);
+                        @memcpy(newBuffer[0..buffer.len], buffer);
 
                         self.allocator.free(buffer);
                         buffer = newBuffer;
