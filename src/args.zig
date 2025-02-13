@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArrayHelper = @import("arrayHelper.zig");
 
 const ParseError = error{
     QuoteDidNotEnd,
@@ -14,20 +15,16 @@ pub const Args = struct {
         return .{ .args = null, .len = 0, .allocator = allocator };
     }
 
-    pub fn clear(self: *const Args) void {
+    pub fn clear(self: *Args) void {
         if (self.args) |cArgs| {
             for (cArgs[0 .. self.len - 1]) |arg| {
                 if (arg) |cArg| {
-                    var i: u64 = 0;
-                    while (true) : (i += 1) {
-                        if (cArg[i] == 0) {
-                            break;
-                        }
-                    }
-                    self.allocator.free(cArg[0 .. i + 1]);
+                    self.allocator.free(ArrayHelper.cStrToSliceSentinel(cArg));
                 }
             }
             self.allocator.free(cArgs[0..self.len]);
+
+            self.args = null;
         }
     }
 

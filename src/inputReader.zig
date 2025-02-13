@@ -74,9 +74,10 @@ pub const InputReader = struct {
         self.buffer = buffer;
     }
 
-    pub fn clear(self: *const InputReader) void {
+    pub fn clear(self: *InputReader) void {
         if (self.buffer) |cBuffer| {
             self.allocator.free(cBuffer);
+            self.buffer = null;
         }
     }
 };

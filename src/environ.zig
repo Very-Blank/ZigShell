@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArrayHelper = @import("arrayHelper.zig");
 
 pub const Environ = struct {
     variables: [*:null]?[*:0]u8,
@@ -30,13 +31,7 @@ pub const Environ = struct {
     pub fn deinit(self: *const Environ) void {
         for (self.variables[0 .. self.len - 1]) |variable| {
             if (variable) |cVariable| {
-                var i: u64 = 0;
-                while (true) : (i += 1) {
-                    if (cVariable[i] == 0) {
-                        break;
-                    }
-                }
-                self.allocator.free(cVariable[0 .. i + 1]);
+                self.allocator.free(ArrayHelper.cStrToSliceSentinel(cVariable));
             }
         }
         self.allocator.free(self.variables[0..self.len]);
