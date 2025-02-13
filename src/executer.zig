@@ -11,6 +11,7 @@ const Builtins = enum {
 
 const ExecuteError = error{
     Exit,
+    ChildExit,
     ArgsNull,
     ArgsTooShort,
     NoCommand,
@@ -68,7 +69,8 @@ pub const Executer = struct {
             // NOTE: ALSO HERE!!
             const errors = std.posix.execvpeZ(args.args.?[0].?, args.args.?, environ.variables);
             std.debug.print("{any}\n", .{errors});
-            std.os.linux.exit(-1);
+            return error.ChildExit;
+            // std.os.linux.exit(-1);
         } else if (pid < 0) {
             return error.ForkFailed;
         } else {

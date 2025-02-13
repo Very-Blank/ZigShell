@@ -65,7 +65,7 @@ pub fn main() !void {
 
         executer.executeArgs(&args, &environ) catch |err| {
             switch (err) {
-                error.Exit => break,
+                error.Exit, error.ChildExit => break,
                 //Non failtal errors
                 error.ArgsNull, error.InvalidPath, error.NoCommand, error.ArgsTooShort => {},
                 else => return err,
