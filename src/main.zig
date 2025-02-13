@@ -57,6 +57,7 @@ pub fn main() !void {
                 error.InvalidPath => _ = try stdout.write("cd: Path was invalid\n"),
                 error.ChangeDirError => _ = try stdout.write("cd: Path was incorrect\n"),
                 error.ArgsNull, error.NoCommand, error.ArgsTooShort => {},
+                //
                 else => return err,
             }
         };

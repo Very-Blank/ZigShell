@@ -68,6 +68,13 @@ pub const Executer = struct {
 
         const pid: std.posix.pid_t = @intCast(std.posix.fork() catch return error.ForkFailed);
         if (pid == 0) {
+            const file = std.fs.cwd().createFile("pipe.txt", .{}) catch return error.NoCommand;
+            defer file.close();
+
+            std.posix.dup2(
+                file.handle,
+                std.posix.STDOUT_FILENO,
+            ) catch return error.NoCommand;
 
             // NOTE: ALSO HERE!!
             const errors = std.posix.execvpeZ(cCommand, cArgs, environ.variables);
