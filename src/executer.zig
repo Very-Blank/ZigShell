@@ -18,6 +18,8 @@ const ExecuteError = error{
     InvalidPath,
     PathWasNull,
     ForkFailed,
+    SystemResources,
+    Unexpected,
 };
 
 pub const Executer = struct {
@@ -63,9 +65,9 @@ pub const Executer = struct {
             }
         }
 
-        const pid: std.os.linux.pid_t = @intCast(std.os.linux.fork());
-        var status: u32 = 0;
+        const pid: std.posix.pid_t = @intCast(try std.posix.fork());
         if (pid == 0) {
+
             // NOTE: ALSO HERE!!
             const errors = std.posix.execvpeZ(args.args.?[0].?, args.args.?, environ.variables);
             std.debug.print("{any}\n", .{errors});
@@ -75,9 +77,10 @@ pub const Executer = struct {
             return error.ForkFailed;
         } else {
             // NOTE: READ MORE OF THE MAN PAGES FOR THESE
-            _ = std.os.linux.waitpid(pid, &status, std.os.linux.W.UNTRACED);
-            while (!std.os.linux.W.IFEXITED(status) and !std.os.linux.W.IFSIGNALED(status)) {
-                _ = std.os.linux.waitpid(pid, &status, std.os.linux.W.UNTRACED);
+
+            var wait: std.posix.WaitPidResult = std.posix.waitpid(pid, std.posix.W.UNTRACED);
+            while (!std.posix.W.IFEXITED(wait.status) and !std.posix.W.IFSIGNALED(wait.status)) {
+                wait = std.posix.waitpid(pid, std.posix.W.UNTRACED);
             }
         }
     }
