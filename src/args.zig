@@ -1,4 +1,10 @@
 const std = @import("std");
+const ArrayHelper = @import("arrayHelper.zig");
+
+const ParseError = error{
+    QuoteDidNotEnd,
+    OutOfMemory,
+};
 
 pub const Args = struct {
     args: ?[*:null]?[*:0]u8,
@@ -9,20 +15,16 @@ pub const Args = struct {
         return .{ .args = null, .len = 0, .allocator = allocator };
     }
 
-    pub fn clear(self: *const Args) void {
+    pub fn clear(self: *Args) void {
         if (self.args) |cArgs| {
             for (cArgs[0 .. self.len - 1]) |arg| {
                 if (arg) |cArg| {
-                    var i: u64 = 0;
-                    while (true) : (i += 1) {
-                        if (cArg[i] == 0) {
-                            break;
-                        }
-                    }
-                    self.allocator.free(cArg[0 .. i + 1]);
+                    self.allocator.free(ArrayHelper.cStrToSliceSentinel(cArg));
                 }
             }
             self.allocator.free(cArgs[0..self.len]);
+
+            self.args = null;
         }
     }
 
@@ -60,7 +62,7 @@ pub const Args = struct {
         }
     }
 
-    pub fn parse(self: *Args, buffer: []u8) !void {
+    pub fn parse(self: *Args, buffer: []u8) ParseError!void {
         // FIXME: change this if mess, use switch or something with states.
         // Also I kind of hate how you need an extra check at the end.
 
@@ -95,14 +97,17 @@ pub const Args = struct {
                 try self.add(buffer[start..buffer.len]);
             }
         } else {
-            return error.QuoteDidNotEnd;
+            return ParseError.QuoteDidNotEnd;
         }
     }
 
     pub fn print(self: *const Args) void {
-        for (0..self.len) |i| {
-            if (self.args[i]) |cArg| {
-                std.debug.print("{s}\n", .{cArg});
+        if (self.args) |cArgs| {
+            std.debug.print("Args:\n", .{});
+            for (0..self.len) |i| {
+                if (cArgs[i]) |cArg| {
+                    std.debug.print("{any}. {s}\n", .{ i, cArg });
+                }
             }
         }
     }

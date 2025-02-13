@@ -2,6 +2,7 @@ const std = @import("std");
 const Args = @import("args.zig").Args;
 const InputReader = @import("inputReader.zig").InputReader;
 const Environ = @import("environ.zig").Environ;
+const Executer = @import("executer.zig").Executer;
 
 // TODO:
 // add buildins! "cd" -> chdir(), to change process dir for the parent (shell),
@@ -24,37 +25,54 @@ pub fn main() !void {
     const stdout = std.io.getStdIn().writer();
     // var bw = std.io.bufferedWriter(stdout);
 
-    _ = try stdout.write(" > ");
     // try bw.flush(); // don't forget to flush!
 
     var inputReader = InputReader.init(allocator);
     defer inputReader.clear();
 
-    try inputReader.read();
-
     var args: Args = Args.init(allocator);
     defer args.clear();
-
-    try args.parse(
-        if (inputReader.buffer) |cBuffer| cBuffer else return error.NoArguments,
-    );
 
     const environ: Environ = try Environ.init(std.os.environ, allocator);
     defer environ.deinit();
 
-    const pid: std.os.linux.pid_t = @intCast(std.os.linux.fork());
-    var status: u32 = 0;
-    if (pid == 0) {
-        // NOTE: ALSO HERE!!
-        const errors = std.posix.execvpeZ(args.args.?[0].?, args.args.?, environ.variables);
-        std.debug.print("{any}\n", .{errors});
-    } else if (pid < 0) {
-        return error.ForkFailed;
-    } else {
-        // NOTE: READ MORE OF THE MAN PAGES FOR THESE
-        _ = std.os.linux.waitpid(pid, &status, std.os.linux.W.UNTRACED);
-        while (!std.os.linux.W.IFEXITED(status) and !std.os.linux.W.IFSIGNALED(status)) {
-            _ = std.os.linux.waitpid(pid, &status, std.os.linux.W.UNTRACED);
+    var executer: Executer = try Executer.init(allocator);
+    defer executer.deinit();
+
+    var delimeter: u8 = '\n';
+
+    while (true) {
+        _ = try stdout.write(" > ");
+        while (true) {
+            try inputReader.read(delimeter);
+
+            args.parse(
+                if (inputReader.buffer) |cBuffer| cBuffer else return error.NoArguments,
+            ) catch |err| {
+                switch (err) {
+                    error.QuoteDidNotEnd => {
+                        delimeter = '"';
+                        continue;
+                    },
+                    else => return err,
+                }
+            };
+
+            break;
         }
+
+        //args.print();
+
+        executer.executeArgs(&args, &environ) catch |err| {
+            switch (err) {
+                error.Exit => break,
+                //Non failtal errors
+                error.ArgsNull, error.InvalidPath, error.NoCommand, error.ArgsTooShort => {},
+                else => return err,
+            }
+        };
+
+        inputReader.clear();
+        args.clear();
     }
 }
