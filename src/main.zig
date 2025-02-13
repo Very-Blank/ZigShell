@@ -5,27 +5,17 @@ const Environ = @import("environ.zig").Environ;
 const Executer = @import("executer.zig").Executer;
 
 // TODO:
-// add buildins! "cd" -> chdir(), to change process dir for the parent (shell),
-// "help",
-// "exit"
-
-// TODO:
 // fix line wrapping
 
 // TODO:
 // maybe change to execvpeZ to execveZ and get the absolute path yourself?
 
 pub fn main() !void {
-    // const stdout_file = std.io.getStdOut().writer();
-    // const stdout = bw.writer();
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer std.debug.print("{any}\n", .{gpa.deinit()});
     const allocator = gpa.allocator();
 
     const stdout = std.io.getStdIn().writer();
-    // var bw = std.io.bufferedWriter(stdout);
-
-    // try bw.flush(); // don't forget to flush!
 
     var inputReader = InputReader.init(allocator);
     defer inputReader.clear();
@@ -66,7 +56,7 @@ pub fn main() !void {
         executer.executeArgs(&args, &environ) catch |err| {
             switch (err) {
                 error.Exit, error.ChildExit => break,
-                //Non failtal errors
+                //Non fatal errors
                 error.ArgsNull, error.InvalidPath, error.NoCommand, error.ArgsTooShort => {},
                 else => return err,
             }
