@@ -51,9 +51,11 @@ pub const Executer = struct {
                 },
                 .cd => {
                     if (args.len != 3) return error.InvalidPath;
+
                     const cPath = if (cArgs[1]) |value| value else return error.PathWasNull;
-                    // FIXME: add print something if path doesn't exist.
+
                     std.posix.chdir(ArrayHelper.cStrToSlice(cPath)) catch return error.ChangeDirError;
+
                     return;
                 },
                 .help => {

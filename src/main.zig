@@ -54,7 +54,9 @@ pub fn main() !void {
             switch (err) {
                 error.Exit, error.ChildExit => break,
                 //Non fatal errors
-                error.ArgsNull, error.InvalidPath, error.NoCommand, error.ArgsTooShort => {},
+                error.InvalidPath => _ = try stdout.write("cd: Path was invalid\n"),
+                error.ChangeDirError => _ = try stdout.write("cd: Path was incorrect\n"),
+                error.ArgsNull, error.NoCommand, error.ArgsTooShort => {},
                 else => return err,
             }
         };
