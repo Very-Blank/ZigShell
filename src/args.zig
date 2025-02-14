@@ -1,11 +1,6 @@
 const std = @import("std");
 const ArrayHelper = @import("arrayHelper.zig");
 
-const ParseError = error{
-    QuoteDidNotEnd,
-    OutOfMemory,
-};
-
 pub const Args = struct {
     args: ?[*:null]?[*:0]u8,
     len: u64,
@@ -59,45 +54,6 @@ pub const Args = struct {
 
             self.args = newArgs[0..1 :null];
             self.len = 2;
-        }
-    }
-
-    pub fn parse(self: *Args, buffer: []u8) ParseError!void {
-        // FIXME: change this if mess, use switch or something with states.
-        // Also I kind of hate how you need an extra check at the end.
-
-        var start: u64 = 0;
-        var quoteStarted: bool = false;
-
-        for (0..buffer.len) |i| {
-            if (!quoteStarted) {
-                if (std.ascii.isWhitespace(buffer[i])) {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
-                    }
-
-                    start = i + 1;
-                } else if (buffer[i] == '"') {
-                    quoteStarted = true;
-                    start = i + 1;
-                }
-            } else {
-                if (buffer[i] == '"') {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
-                    }
-
-                    quoteStarted = false;
-                }
-            }
-        }
-
-        if (!quoteStarted) {
-            if (buffer.len - start >= 1) {
-                try self.add(buffer[start..buffer.len]);
-            }
-        } else {
-            return ParseError.QuoteDidNotEnd;
         }
     }
 
