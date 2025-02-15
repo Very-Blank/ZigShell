@@ -1,5 +1,6 @@
 const std = @import("std");
 const Args = @import("args.zig").Args;
+const CommandQueue = @import("commandQueue.zig").CommandQueue;
 const Environ = @import("environ.zig").Environ;
 const ArrayHelper = @import("arrayHelper.zig");
 
@@ -37,6 +38,8 @@ pub const Executer = struct {
     pub fn deinit(self: *Executer) void {
         self.hashmap.deinit();
     }
+
+    pub fn executeCommands() void {}
 
     pub fn executeArgs(self: *const Executer, args: *const Args, environ: *const Environ) ExecuteError!void {
         if (args.len <= 1) return error.ArgsTooShort;
