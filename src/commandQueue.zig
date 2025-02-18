@@ -77,6 +77,9 @@ pub const CommandQueue = struct {
         } else {
             return ParseError.QuoteDidNotEnd;
         }
+
+        //Check here if the commands ended
+        // if()
     }
 
     pub fn new(self: *CommandQueue) !void {
