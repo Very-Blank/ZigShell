@@ -1,6 +1,7 @@
 const std = @import("std");
 const Args = @import("args.zig").Args;
 const CommandQueue = @import("commandQueue.zig").CommandQueue;
+const Command = @import("commandQueue.zig").Command;
 const Environ = @import("environ.zig").Environ;
 const ArrayHelper = @import("arrayHelper.zig");
 
@@ -39,7 +40,69 @@ pub const Executer = struct {
         self.hashmap.deinit();
     }
 
-    pub fn executeCommands() void {}
+    pub fn executeCommands(self: *const Executer, commandQueue: *const CommandQueue, environ: *const Environ) void {
+        // var pipe: bool = false;
+        for (commandQueue.commands) |cCommand| {
+            if (cCommand.args.len <= 1) return error.ArgsTooShort;
+
+            const cArgs = if (cCommand.args.args) |value| value else return error.ArgsNull;
+            const cPath = if (cCommand.cArgs[0]) |value| value else return error.NoCommand;
+
+            if (self.hashmap.get(ArrayHelper.cStrToSlice(cCommand))) |builtin| {
+                switch (builtin) {
+                    .exit => {
+                        return error.Exit;
+                    },
+                    .cd => {
+                        if (cCommand.args.len != 3) return error.InvalidPath;
+
+                        const cfilePath = if (cArgs[1]) |value| value else return error.PathWasNull;
+
+                        std.posix.chdir(ArrayHelper.cStrToSlice(cfilePath)) catch return error.ChangeDirError;
+
+                        continue;
+                    },
+                    .help => {
+                        // FIXME: add some help info
+                        continue;
+                    },
+                    // else => unreachable,
+                }
+            }
+
+            const pid: std.posix.pid_t = @intCast(std.posix.fork() catch return error.ForkFailed);
+            if (pid == 0) {
+                // const file = std.fs.cwd().createFile("pipe.txt", .{}) catch return error.NoCommand;
+                // defer file.close();
+                //
+                // std.posix.dup2(
+                //     file.handle,
+                //     std.posix.STDOUT_FILENO,
+                // ) catch return error.NoCommand;
+                if (cCommand.operator) {}
+
+                std.posix.dup2(
+                    std.posix.STDIN_FILENO,
+                    std.posix.STDOUT_FILENO,
+                ) catch return error.NoCommand;
+
+                // NOTE: ALSO HERE!!
+                const errors = std.posix.execvpeZ(cPath, cArgs, environ.variables);
+                std.debug.print("{any}\n", .{errors});
+                return error.ChildExit;
+                // std.os.linux.exit(-1);
+            } else if (pid < 0) {
+                return error.ForkFailed;
+            } else {
+                // NOTE: READ MORE OF THE MAN PAGES FOR THESE
+
+                var wait: std.posix.WaitPidResult = std.posix.waitpid(pid, std.posix.W.UNTRACED);
+                while (!std.posix.W.IFEXITED(wait.status) and !std.posix.W.IFSIGNALED(wait.status)) {
+                    wait = std.posix.waitpid(pid, std.posix.W.UNTRACED);
+                }
+            }
+        }
+    }
 
     pub fn executeArgs(self: *const Executer, args: *const Args, environ: *const Environ) ExecuteError!void {
         if (args.len <= 1) return error.ArgsTooShort;

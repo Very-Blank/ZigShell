@@ -9,7 +9,7 @@ const Operator = enum {
     seperate,
 };
 
-const Command = struct {
+pub const Command = struct {
     args: Args,
     ///Operator after the args
     operator: Operator,
@@ -44,8 +44,13 @@ pub const CommandQueue = struct {
 
                     start = i + 1;
                 } else if (buffer[i] == '>') {
-                    try self.set(.rAppend);
-                    try self.new();
+                    if (i + 1 < buffer.len and buffer[i] == '>') {
+                        try self.set(.rOverride);
+                        try self.new();
+                    } else {
+                        try self.set(.rAppend);
+                        try self.new();
+                    }
 
                     start = i + 1;
                 } else if (buffer[i] == '|') {
@@ -78,6 +83,8 @@ pub const CommandQueue = struct {
             return ParseError.QuoteDidNotEnd;
         }
 
+        //check that the did not end in on a operator.
+
         //Check here if the commands ended
         // if()
     }
@@ -99,12 +106,10 @@ pub const CommandQueue = struct {
     pub fn set(self: *CommandQueue, operator: Operator) !void {
         if (self.commands) |cCommands| {
             if (cCommands[cCommands.len - 1].operator == .none) {
-                cCommands[cCommands.len - 1].operator = operator;
-            } else if (cCommands[cCommands.len - 1].operator == .rAppend) {
-                if (operator == .rAppend) {
-                    cCommands[cCommands.len - 1].operator = .rOverride;
+                if (cCommands[cCommands.len - 1].args.len > 1) {
+                    cCommands[cCommands.len - 1].operator = operator;
                 } else {
-                    return error.TriedSettingOperatorTwice;
+                    return error.NoArgs;
                 }
             } else {
                 return error.TriedSettingOperatorTwice;
