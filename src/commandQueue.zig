@@ -1,18 +1,15 @@
 const std = @import("std");
 const Args = @import("args.zig").Args;
 
-const Operator = enum {
-    none,
+pub const Operator = enum {
     pipe,
     rOverride,
     rAppend,
-    seperate,
 };
 
 pub const Command = struct {
     args: Args,
-    ///Operator after the args
-    operator: Operator,
+    operator: ?Operator,
 };
 
 const ParseError = error{
@@ -30,6 +27,8 @@ pub const CommandQueue = struct {
 
         var start: u64 = 0;
         var quoteStarted: bool = false;
+        // after getting file name it should be an error to put anything else than ;
+        var file: bool = true;
 
         for (0..buffer.len) |i| {
             if (!quoteStarted) {
@@ -46,10 +45,12 @@ pub const CommandQueue = struct {
                 } else if (buffer[i] == '>') {
                     if (i + 1 < buffer.len and buffer[i] == '>') {
                         try self.set(.rOverride);
-                        try self.new();
+                        // try self.new();
+                        file = true;
                     } else {
                         try self.set(.rAppend);
-                        try self.new();
+                        // try self.new();
+                        file = true;
                     }
 
                     start = i + 1;
@@ -59,7 +60,9 @@ pub const CommandQueue = struct {
 
                     start = i + 1;
                 } else if (buffer[i] == ';') {
-                    try self.set(.seperate);
+                    if (i - start >= 1) {
+                        try self.add(buffer[start..i]);
+                    }
                     try self.new();
 
                     start = i + 1;
@@ -70,6 +73,7 @@ pub const CommandQueue = struct {
                         try self.add(buffer[start..i]);
                     }
 
+                    start = i + 1;
                     quoteStarted = false;
                 }
             }
@@ -83,10 +87,11 @@ pub const CommandQueue = struct {
             return ParseError.QuoteDidNotEnd;
         }
 
-        //check that the did not end in on a operator.
-
-        //Check here if the commands ended
-        // if()
+        if (self.commands) |cCommands| {
+            if (cCommands[cCommands.len - 1].operator != null) {
+                return error.NoOperatorTarget;
+            }
+        }
     }
 
     pub fn new(self: *CommandQueue) !void {
@@ -105,7 +110,7 @@ pub const CommandQueue = struct {
 
     pub fn set(self: *CommandQueue, operator: Operator) !void {
         if (self.commands) |cCommands| {
-            if (cCommands[cCommands.len - 1].operator == .none) {
+            if (cCommands[cCommands.len - 1].operator == null) {
                 if (cCommands[cCommands.len - 1].args.len > 1) {
                     cCommands[cCommands.len - 1].operator = operator;
                 } else {
@@ -124,7 +129,7 @@ pub const CommandQueue = struct {
             try cCommands[cCommands.len - 1].add(arg);
         } else {
             const newCommands = try self.allocator.alloc(Command, 1);
-            newCommands[self.commands.len - 1] = .{ .args = Args.init(self.allocator), .operator = Operator.none };
+            newCommands[self.commands.len - 1] = .{ .args = Args.init(self.allocator), .operator = null };
             self.commands = newCommands;
         }
     }
