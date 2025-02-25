@@ -17,6 +17,13 @@ const ParseError = error{
     OutOfMemory,
 };
 
+const State = enum {
+    normal,
+    quote,
+    fileName,
+    end,
+};
+
 pub const CommandQueue = struct {
     commands: ?[]Command,
     allocator: std.mem.Allocator,
@@ -26,9 +33,101 @@ pub const CommandQueue = struct {
         // Also I kind of hate how you need an extra check at the end.
 
         var start: u64 = 0;
+        var state: State = .normal;
         var quoteStarted: bool = false;
         // after getting file name it should be an error to put anything else than ;
         var file: bool = true;
+        // var file: bool = true;
+
+        for (0..buffer.len) |i| {
+            switch (state) {
+                .normal => {
+                    switch (buffer[i]) {
+                        std.ascii.whitespace => {
+                            start = i + 1;
+                        },
+                        '"' => {
+                            state = .quote;
+                            start = i + 1;
+                        },
+                        ';' => {
+                            if (i - start >= 1) {
+                                try self.add(buffer[start..i]);
+                            }
+                            try self.new();
+                            start = i + 1;
+                        },
+                        '>' => {},
+                        '|' => {},
+                    }
+                },
+                .qoute => {},
+                .file => {},
+                .end => {},
+            }
+
+            if (!quoteStarted) {
+                if (std.ascii.isWhitespace(buffer[i])) {
+                    if (i - start >= 1) {
+                        try self.add(buffer[start..i]);
+                    }
+
+                    start = i + 1;
+                } else if (buffer[i] == '"') {
+                    quoteStarted = true;
+
+                    start = i + 1;
+                } else if (buffer[i] == '>') {
+                    if (i + 1 < buffer.len and buffer[i] == '>') {
+                        try self.set(.rOverride);
+                        // try self.new();
+                        file = true;
+                    } else {
+                        try self.set(.rAppend);
+                        // try self.new();
+                        file = true;
+                    }
+
+                    start = i + 1;
+                } else if (buffer[i] == '|') {
+                    try self.set(.pipe);
+                    try self.new();
+
+                    start = i + 1;
+                } else if (buffer[i] == ';') {
+                    if (i - start >= 1) {
+                        try self.add(buffer[start..i]);
+                    }
+                    try self.new();
+
+                    start = i + 1;
+                }
+            } else if (quoteStarted) {
+                if (buffer[i] == '"') {
+                    if (i - start >= 1) {
+                        try self.add(buffer[start..i]);
+                    }
+
+                    start = i + 1;
+                    quoteStarted = false;
+                }
+            } else if (file) {
+                if (std.ascii.isWhitespace(buffer[i])) {
+                    if (i - start >= 1) {
+                        try self.add(buffer[start..i]);
+                    }
+
+                    start = i + 1;
+                } else if (buffer[i] == ';') {
+                    if (i - start >= 1) {
+                        try self.add(buffer[start..i]);
+                    }
+                    try self.new();
+
+                    start = i + 1;
+                }
+            }
+        }
 
         for (0..buffer.len) |i| {
             if (!quoteStarted) {
@@ -67,7 +166,7 @@ pub const CommandQueue = struct {
 
                     start = i + 1;
                 }
-            } else {
+            } else if (quoteStarted) {
                 if (buffer[i] == '"') {
                     if (i - start >= 1) {
                         try self.add(buffer[start..i]);
@@ -75,6 +174,21 @@ pub const CommandQueue = struct {
 
                     start = i + 1;
                     quoteStarted = false;
+                }
+            } else if (file) {
+                if (std.ascii.isWhitespace(buffer[i])) {
+                    if (i - start >= 1) {
+                        try self.add(buffer[start..i]);
+                    }
+
+                    start = i + 1;
+                } else if (buffer[i] == ';') {
+                    if (i - start >= 1) {
+                        try self.add(buffer[start..i]);
+                    }
+                    try self.new();
+
+                    start = i + 1;
                 }
             }
         }
