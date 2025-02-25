@@ -13,8 +13,13 @@ pub const Command = struct {
 };
 
 const ParseError = error{
+    WrongStartState,
     QuoteDidNotEnd,
     OutOfMemory,
+    NoOperatorTarget,
+    NotNewCommandOperator,
+    ExpectedFile,
+    NoFile,
 };
 
 const State = enum {
@@ -26,185 +31,134 @@ const State = enum {
 
 pub const CommandQueue = struct {
     commands: ?[]Command,
+    fileNames: ?std.ArrayList([]u8),
     allocator: std.mem.Allocator,
 
-    pub fn parse(self: *CommandQueue, buffer: []u8) ParseError!void {
-        // FIXME: change this if mess, use switch or something with states.
-        // Also I kind of hate how you need an extra check at the end.
+    pub fn parse(self: *CommandQueue, buffer: []u8, state: State) ParseError!void {
+        switch (state) {
+            .end => return ParseError.WrongStartState,
+            else => {},
+        }
 
-        var start: u64 = 0;
-        var state: State = .normal;
-        var quoteStarted: bool = false;
-        // after getting file name it should be an error to put anything else than ;
-        var file: bool = true;
-        // var file: bool = true;
-
-        for (0..buffer.len) |i| {
+        var i: u64 = 0;
+        var j: u64 = 0;
+        while (j < buffer.len) : (j += 1) {
             switch (state) {
                 .normal => {
-                    switch (buffer[i]) {
-                        std.ascii.whitespace => {
-                            start = i + 1;
+                    switch (buffer[j]) {
+                        std.ascii.whitespace, '"', ';', '>', '|' => {
+                            if (j - i >= 1) {
+                                try self.add(buffer[i..j]);
+                            }
+
+                            i = j + 1;
                         },
+                        else => {},
+                    }
+
+                    switch (buffer[j]) {
                         '"' => {
                             state = .quote;
-                            start = i + 1;
                         },
                         ';' => {
-                            if (i - start >= 1) {
-                                try self.add(buffer[start..i]);
-                            }
                             try self.new();
-                            start = i + 1;
                         },
-                        '>' => {},
-                        '|' => {},
+                        '>' => {
+                            if (j + 1 < buffer.len and buffer[j + 1] == '>') {
+                                j += 1;
+                                i = j + 1;
+
+                                try self.set(.rAppend);
+                                state = .fileName;
+                            } else {
+                                try self.set(.rOverride);
+                                state = .fileName;
+                            }
+                        },
+                        '|' => {
+                            try self.set(.pipe);
+                            try self.new();
+                        },
+                        else => {},
                     }
                 },
-                .qoute => {},
-                .file => {},
-                .end => {},
-            }
+                .qoute => {
+                    switch (buffer[j]) {
+                        '"' => {
+                            if (j - i >= 1) {
+                                try self.add(buffer[i..j]);
+                            }
+                            i = j + 1;
+                            try self.new();
 
-            if (!quoteStarted) {
-                if (std.ascii.isWhitespace(buffer[i])) {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
+                            state = .normal;
+                        },
+                        else => {},
                     }
+                },
+                .file => {
+                    switch (buffer[j]) {
+                        std.ascii.whitespace => {
+                            if (j - i >= 1) {
+                                if (self.fileNames) |cFileNames| {
+                                    try cFileNames.append(try self.allocator.dupe([]u8, buffer[i..j]));
+                                } else {
+                                    const fileNames = std.ArrayList(u8).init(self.allocator);
+                                    try fileNames.append(try self.allocator.dupe([]u8, buffer[i..j]));
+                                    self.fileNames = fileNames;
+                                }
 
-                    start = i + 1;
-                } else if (buffer[i] == '"') {
-                    quoteStarted = true;
-
-                    start = i + 1;
-                } else if (buffer[i] == '>') {
-                    if (i + 1 < buffer.len and buffer[i] == '>') {
-                        try self.set(.rOverride);
-                        // try self.new();
-                        file = true;
-                    } else {
-                        try self.set(.rAppend);
-                        // try self.new();
-                        file = true;
+                                state = .end;
+                            }
+                            i = j + 1;
+                        },
+                        '"', ';', '>', '|' => {
+                            return ParseError.ExpectedFile;
+                        },
+                        else => {},
                     }
-
-                    start = i + 1;
-                } else if (buffer[i] == '|') {
-                    try self.set(.pipe);
-                    try self.new();
-
-                    start = i + 1;
-                } else if (buffer[i] == ';') {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
+                },
+                .end => {
+                    switch (buffer[j]) {
+                        std.ascii.whitespace => {},
+                        ';' => {
+                            self.new();
+                            state = .normal;
+                        },
+                        else => return ParseError.NotNewCommandOperator,
                     }
-                    try self.new();
-
-                    start = i + 1;
-                }
-            } else if (quoteStarted) {
-                if (buffer[i] == '"') {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
-                    }
-
-                    start = i + 1;
-                    quoteStarted = false;
-                }
-            } else if (file) {
-                if (std.ascii.isWhitespace(buffer[i])) {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
-                    }
-
-                    start = i + 1;
-                } else if (buffer[i] == ';') {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
-                    }
-                    try self.new();
-
-                    start = i + 1;
-                }
+                },
             }
         }
 
-        for (0..buffer.len) |i| {
-            if (!quoteStarted) {
-                if (std.ascii.isWhitespace(buffer[i])) {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
-                    }
-
-                    start = i + 1;
-                } else if (buffer[i] == '"') {
-                    quoteStarted = true;
-
-                    start = i + 1;
-                } else if (buffer[i] == '>') {
-                    if (i + 1 < buffer.len and buffer[i] == '>') {
-                        try self.set(.rOverride);
-                        // try self.new();
-                        file = true;
-                    } else {
-                        try self.set(.rAppend);
-                        // try self.new();
-                        file = true;
-                    }
-
-                    start = i + 1;
-                } else if (buffer[i] == '|') {
-                    try self.set(.pipe);
-                    try self.new();
-
-                    start = i + 1;
-                } else if (buffer[i] == ';') {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
-                    }
-                    try self.new();
-
-                    start = i + 1;
-                }
-            } else if (quoteStarted) {
-                if (buffer[i] == '"') {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
-                    }
-
-                    start = i + 1;
-                    quoteStarted = false;
-                }
-            } else if (file) {
-                if (std.ascii.isWhitespace(buffer[i])) {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
-                    }
-
-                    start = i + 1;
-                } else if (buffer[i] == ';') {
-                    if (i - start >= 1) {
-                        try self.add(buffer[start..i]);
-                    }
-                    try self.new();
-
-                    start = i + 1;
-                }
-            }
-        }
-
-        if (!quoteStarted) {
-            if (buffer.len - start >= 1) {
-                try self.add(buffer[start..buffer.len]);
-            }
-        } else {
-            return ParseError.QuoteDidNotEnd;
+        switch (state) {
+            .qoute => {
+                return ParseError.QuoteDidNotEnd;
+            },
+            .file => {
+                return ParseError.NoFile;
+            },
+            else => {},
         }
 
         if (self.commands) |cCommands| {
             if (cCommands[cCommands.len - 1].operator != null) {
-                return error.NoOperatorTarget;
+                return ParseError.NoOperatorTarget;
             }
+        }
+    }
+
+    pub fn clear(self: *CommandQueue) void {
+        if (self.commands) |cCommands| {
+            self.allocator.free(cCommands);
+        }
+
+        if (self.fileNames) |cFileNames| {
+            for (cFileNames.items) |item| {
+                self.allocator.free(item);
+            }
+            cFileNames.deinit();
+            self.fileNames = null;
         }
     }
 
