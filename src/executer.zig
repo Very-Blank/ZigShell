@@ -25,7 +25,7 @@ const ExecuteError = error{
 };
 
 const Pid = struct {
-    operator: Operator,
+    operator: ?Operator,
     pid: std.posix.pid_t,
 };
 
@@ -51,11 +51,12 @@ pub const Executer = struct {
         self.hashmap.deinit();
     }
 
-    // This will not work you have to launch every command at the same time
-    // For piping to work you have to keep track of the last pid before the one you lanched
-    // Then you just connect use dup to take the stdout of the command before and connect that into the new commands stdin
     pub fn executeCommands(self: *const Executer, commandQueue: *const CommandQueue, environ: *const Environ) void {
-        var pids: std.ArrayList(Pid) = std.ArrayList(Pid).init(self.allocator);
+        var lastOperator: ?Operator = null;
+        var p: [2]std.posix.fd_t = .{ 0, 0 };
+        var pid: std.posix.pid_t = 0;
+        var fd_in: std.posix.fd_t = std.posix.STDIN_FILENO;
+
         // var pipe: bool = false;
         if (commandQueue.commands) |cCommands| {
             for (cCommands) |command| {
@@ -86,10 +87,28 @@ pub const Executer = struct {
                     }
                 }
 
-                const pid: std.posix.pid_t = @intCast(std.posix.fork() catch return error.ForkFailed);
+                if (command.operator) |operator| if (operator == .pipe) std.posix.pipe(p);
+
+                pid = @intCast(std.posix.fork() catch return error.ForkFailed);
+
                 if (pid == 0) {
+                    if (lastOperator) |cLastOperator| {
+                        if (cLastOperator == .pipe) {
+                            std.posix.dup2(fd_in, std.posix.STDIN_FILENO);
+                            std.posix.close(p[0]);
+                        }
+                    }
+
+                    if (command.operator) |cOperator| {
+                        switch (cOperator) {
+                            .pipe => {},
+                            .rOverride => {},
+                            .rAppend => {},
+                        }
+                    }
+
                     if (command.operator == .pipe) {
-                        pipe = true;
+                        // pipe = true;
                         std.posix.dup2(
                             std.posix.STDIN_FILENO,
                             std.posix.STDOUT_FILENO,
