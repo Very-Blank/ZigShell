@@ -18,7 +18,7 @@ pub const Args = struct {
                 }
             }
             self.allocator.free(cArgs[0..self.len]);
-
+            self.len = 0;
             self.args = null;
         }
     }

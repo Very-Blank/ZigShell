@@ -22,12 +22,16 @@ const ExecuteError = error{
     PathWasNull,
     ForkFailed,
     ChangeDirError,
+    FailedToOpenFile,
+    PipeFailed,
+    Dup2Failed,
+    MissingFileName,
+    MissingFilesNames,
 };
 
-const Pid = struct {
-    operator: ?Operator,
-    pid: std.posix.pid_t,
-};
+pub fn isPipe(pipe: ?Operator) bool {
+    return if (pipe) |cPipe| return cPipe == .pipe else return false;
+}
 
 pub const Executer = struct {
     hashmap: std.StringHashMap(Builtins),
@@ -51,21 +55,21 @@ pub const Executer = struct {
         self.hashmap.deinit();
     }
 
-    pub fn executeCommands(self: *const Executer, commandQueue: *const CommandQueue, environ: *const Environ) void {
+    pub fn executeCommands(self: *const Executer, commandQueue: *const CommandQueue, environ: *const Environ) ExecuteError!void {
         var lastOperator: ?Operator = null;
         var p: [2]std.posix.fd_t = .{ 0, 0 };
         var pid: std.posix.pid_t = 0;
         var fd_in: std.posix.fd_t = std.posix.STDIN_FILENO;
+        var currentFile: u64 = 0;
 
-        // var pipe: bool = false;
         if (commandQueue.commands) |cCommands| {
             for (cCommands) |command| {
                 if (command.args.len <= 1) return error.ArgsTooShort;
 
-                const cArgs = if (command.args.args) |value| value else return error.ArgsNull;
-                const cPath = if (command.cArgs[0]) |value| value else return error.NoCommand;
+                const cArgs: [*:null]?[*:0]u8 = if (command.args.args) |value| value else return error.ArgsNull;
+                const cPath = if (cArgs[0]) |value| value else return error.NoCommand;
 
-                if (self.hashmap.get(ArrayHelper.cStrToSlice(command))) |builtin| {
+                if (self.hashmap.get(ArrayHelper.cStrToSlice(cPath))) |builtin| {
                     switch (builtin) {
                         .exit => {
                             return error.Exit;
@@ -87,121 +91,122 @@ pub const Executer = struct {
                     }
                 }
 
-                if (command.operator) |operator| if (operator == .pipe) std.posix.pipe(p);
+                if (isPipe(command.operator) or isPipe(lastOperator)) {
+                    p = std.posix.pipe() catch return error.PipeFailed;
+                }
 
                 pid = @intCast(std.posix.fork() catch return error.ForkFailed);
 
                 if (pid == 0) {
-                    if (lastOperator) |cLastOperator| {
-                        if (cLastOperator == .pipe) {
-                            std.posix.dup2(fd_in, std.posix.STDIN_FILENO);
-                            std.posix.close(p[0]);
-                        }
+                    if (isPipe(lastOperator)) {
+                        std.posix.dup2(fd_in, std.posix.STDIN_FILENO) catch return error.Dup2Failed;
                     }
 
                     if (command.operator) |cOperator| {
                         switch (cOperator) {
-                            .pipe => {},
-                            .rOverride => {},
+                            .pipe => {
+                                std.posix.dup2(p[1], std.posix.STDOUT_FILENO) catch return error.Dup2Failed;
+                            },
+                            .rOverride => {
+                                if (commandQueue.fileNames) |cFileNames| {
+                                    if (currentFile < cFileNames.items.len) {
+                                        const file = std.fs.cwd().createFile(cFileNames.items[currentFile], .{}) catch return error.FailedToOpenFile;
+                                        // defer file.close(); ?
+                                        currentFile += 1;
+
+                                        std.posix.dup2(
+                                            file.handle,
+                                            std.posix.STDOUT_FILENO,
+                                        ) catch return error.Dup2Failed;
+                                    } else {
+                                        return error.MissingFileName;
+                                    }
+                                } else {
+                                    return error.MissingFilesNames;
+                                }
+                            },
                             .rAppend => {},
                         }
                     }
 
-                    if (command.operator == .pipe) {
-                        // pipe = true;
-                        std.posix.dup2(
-                            std.posix.STDIN_FILENO,
-                            std.posix.STDOUT_FILENO,
-                        ) catch return error.NoCommand;
-                    }
-                    if (command.operator == .rAppend or command.operator == .rOverride) {
-                        const file = std.fs.cwd().createFile("pipe.txt", .{}) catch return error.NoCommand;
-                        defer file.close();
-
-                        std.posix.dup2(
-                            file.handle,
-                            std.posix.STDOUT_FILENO,
-                        ) catch return error.NoCommand;
+                    if (isPipe(command.operator) or isPipe(lastOperator)) {
+                        std.posix.close(p[0]);
                     }
 
-                    if (pipe) {
-                        std.posix.dup2(
-                            std.posix.STDOUT_FILENO,
-                            std.posix.STDIN_FILENO,
-                        ) catch return error.NoCommand;
-                    }
+                    lastOperator = command.operator;
 
-                    // NOTE: ALSO HERE!!
                     const errors = std.posix.execvpeZ(cPath, cArgs, environ.variables);
                     std.debug.print("{any}\n", .{errors});
                     return error.ChildExit;
-                    // std.os.linux.exit(-1);
                 } else if (pid < 0) {
                     return error.ForkFailed;
                 } else {
-                    // NOTE: READ MORE OF THE MAN PAGES FOR THESE
-
                     var wait: std.posix.WaitPidResult = std.posix.waitpid(pid, std.posix.W.UNTRACED);
                     while (!std.posix.W.IFEXITED(wait.status) and !std.posix.W.IFSIGNALED(wait.status)) {
                         wait = std.posix.waitpid(pid, std.posix.W.UNTRACED);
+                    }
+
+                    if (isPipe(command.operator) or isPipe(lastOperator)) {
+                        std.posix.close(p[1]);
+                        fd_in = p[0];
                     }
                 }
             }
         }
     }
 
-    pub fn executeArgs(self: *const Executer, args: *const Args, environ: *const Environ) ExecuteError!void {
-        if (args.len <= 1) return error.ArgsTooShort;
-
-        const cArgs = if (args.args) |value| value else return error.ArgsNull;
-        const cCommand = if (cArgs[0]) |value| value else return error.NoCommand;
-
-        if (self.hashmap.get(ArrayHelper.cStrToSlice(cCommand))) |builtin| {
-            switch (builtin) {
-                .exit => {
-                    return error.Exit;
-                },
-                .cd => {
-                    if (args.len != 3) return error.InvalidPath;
-
-                    const cPath = if (cArgs[1]) |value| value else return error.PathWasNull;
-
-                    std.posix.chdir(ArrayHelper.cStrToSlice(cPath)) catch return error.ChangeDirError;
-
-                    return;
-                },
-                .help => {
-                    // FIXME: add some help info
-                    return;
-                },
-                // else => unreachable,
-            }
-        }
-
-        const pid: std.posix.pid_t = @intCast(std.posix.fork() catch return error.ForkFailed);
-        if (pid == 0) {
-            const file = std.fs.cwd().createFile("pipe.txt", .{}) catch return error.NoCommand;
-            defer file.close();
-
-            std.posix.dup2(
-                file.handle,
-                std.posix.STDOUT_FILENO,
-            ) catch return error.NoCommand;
-
-            // NOTE: ALSO HERE!!
-            const errors = std.posix.execvpeZ(cCommand, cArgs, environ.variables);
-            std.debug.print("{any}\n", .{errors});
-            return error.ChildExit;
-            // std.os.linux.exit(-1);
-        } else if (pid < 0) {
-            return error.ForkFailed;
-        } else {
-            // NOTE: READ MORE OF THE MAN PAGES FOR THESE
-
-            var wait: std.posix.WaitPidResult = std.posix.waitpid(pid, std.posix.W.UNTRACED);
-            while (!std.posix.W.IFEXITED(wait.status) and !std.posix.W.IFSIGNALED(wait.status)) {
-                wait = std.posix.waitpid(pid, std.posix.W.UNTRACED);
-            }
-        }
-    }
+    // pub fn executeArgs(self: *const Executer, args: *const Args, environ: *const Environ) ExecuteError!void {
+    //     if (args.len <= 1) return error.ArgsTooShort;
+    //
+    //     const cArgs = if (args.args) |value| value else return error.ArgsNull;
+    //     const cCommand = if (cArgs[0]) |value| value else return error.NoCommand;
+    //
+    //     if (self.hashmap.get(ArrayHelper.cStrToSlice(cCommand))) |builtin| {
+    //         switch (builtin) {
+    //             .exit => {
+    //                 return error.Exit;
+    //             },
+    //             .cd => {
+    //                 if (args.len != 3) return error.InvalidPath;
+    //
+    //                 const cPath = if (cArgs[1]) |value| value else return error.PathWasNull;
+    //
+    //                 std.posix.chdir(ArrayHelper.cStrToSlice(cPath)) catch return error.ChangeDirError;
+    //
+    //                 return;
+    //             },
+    //             .help => {
+    //                 // FIXME: add some help info
+    //                 return;
+    //             },
+    //             // else => unreachable,
+    //         }
+    //     }
+    //
+    //     const pid: std.posix.pid_t = @intCast(std.posix.fork() catch return error.ForkFailed);
+    //     if (pid == 0) {
+    //         const file = std.fs.cwd().createFile("pipe.txt", .{}) catch return error.NoCommand;
+    //         defer file.close();
+    //
+    //         std.posix.dup2(
+    //             file.handle,
+    //             std.posix.STDOUT_FILENO,
+    //         ) catch return error.NoCommand;
+    //
+    //         // NOTE: ALSO HERE!!
+    //         const errors = std.posix.execvpeZ(cCommand, cArgs, environ.variables);
+    //         std.debug.print("{any}\n", .{errors});
+    //         return error.ChildExit;
+    //         // std.os.linux.exit(-1);
+    //     } else if (pid < 0) {
+    //         return error.ForkFailed;
+    //     } else {
+    //         // NOTE: READ MORE OF THE MAN PAGES FOR THESE
+    //
+    //         var wait: std.posix.WaitPidResult = std.posix.waitpid(pid, std.posix.W.UNTRACED);
+    //         while (!std.posix.W.IFEXITED(wait.status) and !std.posix.W.IFSIGNALED(wait.status)) {
+    //             wait = std.posix.waitpid(pid, std.posix.W.UNTRACED);
+    //         }
+    //     }
+    // }
 };

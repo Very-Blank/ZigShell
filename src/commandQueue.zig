@@ -20,6 +20,9 @@ const ParseError = error{
     NotNewCommandOperator,
     ExpectedFile,
     NoFile,
+    AddFailed,
+    NewFailed,
+    SetFailed,
 };
 
 const State = enum {
@@ -34,7 +37,12 @@ pub const CommandQueue = struct {
     fileNames: ?std.ArrayList([]u8),
     allocator: std.mem.Allocator,
 
-    pub fn parse(self: *CommandQueue, buffer: []u8, state: State) ParseError!void {
+    pub fn init(allocator: std.mem.Allocator) CommandQueue {
+        return .{ .commands = null, .fileNames = null, .allocator = allocator };
+    }
+
+    pub fn parse(self: *CommandQueue, buffer: []u8, sState: State) ParseError!void {
+        var state = sState;
         switch (state) {
             .end => return ParseError.WrongStartState,
             else => {},
@@ -46,9 +54,9 @@ pub const CommandQueue = struct {
             switch (state) {
                 .normal => {
                     switch (buffer[j]) {
-                        std.ascii.whitespace, '"', ';', '>', '|' => {
+                        std.ascii.whitespace[0], std.ascii.whitespace[1], std.ascii.whitespace[2], std.ascii.whitespace[3], std.ascii.whitespace[4], std.ascii.whitespace[5], '"', ';', '>', '|' => {
                             if (j - i >= 1) {
-                                try self.add(buffer[i..j]);
+                                self.add(buffer[i..j]) catch return ParseError.AddFailed;
                             }
 
                             i = j + 1;
@@ -61,50 +69,51 @@ pub const CommandQueue = struct {
                             state = .quote;
                         },
                         ';' => {
-                            try self.new();
+                            self.new() catch return ParseError.NewFailed;
                         },
                         '>' => {
                             if (j + 1 < buffer.len and buffer[j + 1] == '>') {
                                 j += 1;
                                 i = j + 1;
 
-                                try self.set(.rAppend);
+                                self.set(.rAppend) catch return ParseError.SetFailed;
                                 state = .fileName;
                             } else {
-                                try self.set(.rOverride);
+                                self.set(.rOverride) catch return ParseError.SetFailed;
                                 state = .fileName;
                             }
                         },
                         '|' => {
-                            try self.set(.pipe);
-                            try self.new();
+                            std.debug.print("pipe\n", .{});
+                            self.set(.pipe) catch return ParseError.SetFailed;
+                            self.new() catch return ParseError.NewFailed;
                         },
                         else => {},
                     }
                 },
-                .qoute => {
+                .quote => {
                     switch (buffer[j]) {
                         '"' => {
                             if (j - i >= 1) {
-                                try self.add(buffer[i..j]);
+                                self.add(buffer[i..j]) catch return ParseError.AddFailed;
                             }
                             i = j + 1;
-                            try self.new();
+                            self.new() catch return ParseError.NewFailed;
 
                             state = .normal;
                         },
                         else => {},
                     }
                 },
-                .file => {
+                .fileName => {
                     switch (buffer[j]) {
-                        std.ascii.whitespace => {
+                        std.ascii.whitespace[0], std.ascii.whitespace[1], std.ascii.whitespace[2], std.ascii.whitespace[3], std.ascii.whitespace[4], std.ascii.whitespace[5] => {
                             if (j - i >= 1) {
-                                if (self.fileNames) |cFileNames| {
-                                    try cFileNames.append(try self.allocator.dupe([]u8, buffer[i..j]));
+                                if (self.fileNames) |*cFileNames| {
+                                    cFileNames.append(self.allocator.dupe(u8, buffer[i..j]) catch return ParseError.OutOfMemory) catch return ParseError.OutOfMemory;
                                 } else {
-                                    const fileNames = std.ArrayList(u8).init(self.allocator);
-                                    try fileNames.append(try self.allocator.dupe([]u8, buffer[i..j]));
+                                    var fileNames = std.ArrayList([]u8).init(self.allocator);
+                                    fileNames.append(self.allocator.dupe(u8, buffer[i..j]) catch return ParseError.OutOfMemory) catch return ParseError.OutOfMemory;
                                     self.fileNames = fileNames;
                                 }
 
@@ -120,9 +129,9 @@ pub const CommandQueue = struct {
                 },
                 .end => {
                     switch (buffer[j]) {
-                        std.ascii.whitespace => {},
+                        std.ascii.whitespace[0], std.ascii.whitespace[1], std.ascii.whitespace[2], std.ascii.whitespace[3], std.ascii.whitespace[4], std.ascii.whitespace[5] => {},
                         ';' => {
-                            self.new();
+                            self.new() catch return ParseError.NewFailed;
                             state = .normal;
                         },
                         else => return ParseError.NotNewCommandOperator,
@@ -132,13 +141,19 @@ pub const CommandQueue = struct {
         }
 
         switch (state) {
-            .qoute => {
+            .quote => {
                 return ParseError.QuoteDidNotEnd;
             },
-            .file => {
+            .fileName => {
                 return ParseError.NoFile;
             },
-            else => {},
+            else => {
+                if (j - i >= 1) {
+                    self.add(buffer[i..j]) catch return ParseError.AddFailed;
+                }
+
+                i = j + 1;
+            },
         }
 
         if (self.commands) |cCommands| {
@@ -150,7 +165,12 @@ pub const CommandQueue = struct {
 
     pub fn clear(self: *CommandQueue) void {
         if (self.commands) |cCommands| {
+            for (cCommands) |*cCommand| {
+                cCommand.args.clear();
+            }
+
             self.allocator.free(cCommands);
+            self.commands = null;
         }
 
         if (self.fileNames) |cFileNames| {
@@ -164,10 +184,10 @@ pub const CommandQueue = struct {
 
     pub fn new(self: *CommandQueue) !void {
         if (self.commands) |cCommands| {
-            const newCommands = try self.allocator.alloc(Command, self.commands.len);
-            @memcpy(newCommands[0..self.commands.len], self.commands);
+            const newCommands = try self.allocator.alloc(Command, cCommands.len + 1);
+            @memcpy(newCommands[0..cCommands.len], cCommands);
 
-            newCommands[self.commands.len] = .{ .args = Args.init(self.allocator), .operator = Operator.none };
+            newCommands[cCommands.len] = .{ .args = Args.init(self.allocator), .operator = null };
 
             self.allocator.free(cCommands);
             self.commands = newCommands;
@@ -179,7 +199,7 @@ pub const CommandQueue = struct {
     pub fn set(self: *CommandQueue, operator: Operator) !void {
         if (self.commands) |cCommands| {
             if (cCommands[cCommands.len - 1].operator == null) {
-                if (cCommands[cCommands.len - 1].args.len > 1) {
+                if (cCommands[cCommands.len - 1].args.len >= 1) {
                     cCommands[cCommands.len - 1].operator = operator;
                 } else {
                     return error.NoArgs;
@@ -194,10 +214,12 @@ pub const CommandQueue = struct {
 
     pub fn add(self: *CommandQueue, arg: []u8) !void {
         if (self.commands) |cCommands| {
-            try cCommands[cCommands.len - 1].add(arg);
+            try cCommands[cCommands.len - 1].args.add(arg);
         } else {
             const newCommands = try self.allocator.alloc(Command, 1);
-            newCommands[self.commands.len - 1] = .{ .args = Args.init(self.allocator), .operator = null };
+            errdefer self.allocator.free(newCommands);
+            newCommands[0] = .{ .args = Args.init(self.allocator), .operator = null };
+            try newCommands[0].args.add(arg);
             self.commands = newCommands;
         }
     }
