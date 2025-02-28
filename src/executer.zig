@@ -133,8 +133,6 @@ pub const Executer = struct {
                         std.posix.close(p[0]);
                     }
 
-                    lastOperator = command.operator;
-
                     const errors = std.posix.execvpeZ(cPath, cArgs, environ.variables);
                     std.debug.print("{any}\n", .{errors});
                     return error.ChildExit;
@@ -150,6 +148,8 @@ pub const Executer = struct {
                         std.posix.close(p[1]);
                         fd_in = p[0];
                     }
+
+                    lastOperator = command.operator;
                 }
             }
         }

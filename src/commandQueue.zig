@@ -84,7 +84,6 @@ pub const CommandQueue = struct {
                             }
                         },
                         '|' => {
-                            std.debug.print("pipe\n", .{});
                             self.set(.pipe) catch return ParseError.SetFailed;
                             self.new() catch return ParseError.NewFailed;
                         },
