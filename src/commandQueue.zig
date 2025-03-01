@@ -144,7 +144,19 @@ pub const CommandQueue = struct {
                 return ParseError.QuoteDidNotEnd;
             },
             .fileName => {
-                return ParseError.NoFile;
+                if (j - i >= 1) {
+                    if (self.fileNames) |*cFileNames| {
+                        cFileNames.append(self.allocator.dupe(u8, buffer[i..j]) catch return ParseError.OutOfMemory) catch return ParseError.OutOfMemory;
+                    } else {
+                        var fileNames = std.ArrayList([]u8).init(self.allocator);
+                        fileNames.append(self.allocator.dupe(u8, buffer[i..j]) catch return ParseError.OutOfMemory) catch return ParseError.OutOfMemory;
+                        self.fileNames = fileNames;
+                    }
+
+                    state = .end;
+                } else {
+                    return ParseError.NoFile;
+                }
             },
             else => {
                 if (j - i >= 1) {
@@ -156,8 +168,18 @@ pub const CommandQueue = struct {
         }
 
         if (self.commands) |cCommands| {
-            if (cCommands[cCommands.len - 1].operator != null) {
-                return ParseError.NoOperatorTarget;
+            if (cCommands.len >= 2 and cCommands[cCommands.len - 1].args.args == null) {
+                if (cCommands[cCommands.len - 2].operator) |cOperator| {
+                    if (cOperator == Operator.pipe) {
+                        return ParseError.NoOperatorTarget;
+                    }
+                }
+            } else {
+                if (cCommands[cCommands.len - 1].operator) |cOperator| {
+                    if (cOperator == Operator.pipe) {
+                        return ParseError.NoOperatorTarget;
+                    }
+                }
             }
         }
     }

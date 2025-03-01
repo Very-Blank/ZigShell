@@ -64,10 +64,10 @@ pub const Executer = struct {
 
         if (commandQueue.commands) |cCommands| {
             for (cCommands) |command| {
-                if (command.args.len <= 1) return error.ArgsTooShort;
+                if (command.args.len <= 1) continue;
 
-                const cArgs: [*:null]?[*:0]u8 = if (command.args.args) |value| value else return error.ArgsNull;
-                const cPath = if (cArgs[0]) |value| value else return error.NoCommand;
+                const cArgs: [*:null]?[*:0]u8 = if (command.args.args) |value| value else continue;
+                const cPath = if (cArgs[0]) |value| value else continue;
 
                 if (self.hashmap.get(ArrayHelper.cStrToSlice(cPath))) |builtin| {
                     switch (builtin) {
