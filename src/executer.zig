@@ -111,7 +111,6 @@ pub const Executer = struct {
                                 if (commandQueue.fileNames) |cFileNames| {
                                     if (currentFile < cFileNames.items.len) {
                                         const file = std.fs.cwd().createFile(cFileNames.items[currentFile], .{}) catch return error.FailedToOpenFile;
-                                        // defer file.close(); ?
                                         currentFile += 1;
 
                                         std.posix.dup2(
@@ -125,7 +124,23 @@ pub const Executer = struct {
                                     return error.MissingFilesNames;
                                 }
                             },
-                            .rAppend => {},
+                            .rAppend => {
+                                if (commandQueue.fileNames) |cFileNames| {
+                                    if (currentFile < cFileNames.items.len) {
+                                        const file = std.fs.cwd().createFile(cFileNames.items[currentFile], .{}) catch return error.FileDidNotExist;
+                                        currentFile += 1;
+
+                                        std.posix.dup2(
+                                            file.handle,
+                                            std.posix.STDOUT_FILENO,
+                                        ) catch return error.Dup2Failed;
+                                    } else {
+                                        return error.MissingFileName;
+                                    }
+                                } else {
+                                    return error.MissingFilesNames;
+                                }
+                            },
                         }
                     }
 
@@ -154,59 +169,4 @@ pub const Executer = struct {
             }
         }
     }
-
-    // pub fn executeArgs(self: *const Executer, args: *const Args, environ: *const Environ) ExecuteError!void {
-    //     if (args.len <= 1) return error.ArgsTooShort;
-    //
-    //     const cArgs = if (args.args) |value| value else return error.ArgsNull;
-    //     const cCommand = if (cArgs[0]) |value| value else return error.NoCommand;
-    //
-    //     if (self.hashmap.get(ArrayHelper.cStrToSlice(cCommand))) |builtin| {
-    //         switch (builtin) {
-    //             .exit => {
-    //                 return error.Exit;
-    //             },
-    //             .cd => {
-    //                 if (args.len != 3) return error.InvalidPath;
-    //
-    //                 const cPath = if (cArgs[1]) |value| value else return error.PathWasNull;
-    //
-    //                 std.posix.chdir(ArrayHelper.cStrToSlice(cPath)) catch return error.ChangeDirError;
-    //
-    //                 return;
-    //             },
-    //             .help => {
-    //                 // FIXME: add some help info
-    //                 return;
-    //             },
-    //             // else => unreachable,
-    //         }
-    //     }
-    //
-    //     const pid: std.posix.pid_t = @intCast(std.posix.fork() catch return error.ForkFailed);
-    //     if (pid == 0) {
-    //         const file = std.fs.cwd().createFile("pipe.txt", .{}) catch return error.NoCommand;
-    //         defer file.close();
-    //
-    //         std.posix.dup2(
-    //             file.handle,
-    //             std.posix.STDOUT_FILENO,
-    //         ) catch return error.NoCommand;
-    //
-    //         // NOTE: ALSO HERE!!
-    //         const errors = std.posix.execvpeZ(cCommand, cArgs, environ.variables);
-    //         std.debug.print("{any}\n", .{errors});
-    //         return error.ChildExit;
-    //         // std.os.linux.exit(-1);
-    //     } else if (pid < 0) {
-    //         return error.ForkFailed;
-    //     } else {
-    //         // NOTE: READ MORE OF THE MAN PAGES FOR THESE
-    //
-    //         var wait: std.posix.WaitPidResult = std.posix.waitpid(pid, std.posix.W.UNTRACED);
-    //         while (!std.posix.W.IFEXITED(wait.status) and !std.posix.W.IFSIGNALED(wait.status)) {
-    //             wait = std.posix.waitpid(pid, std.posix.W.UNTRACED);
-    //         }
-    //     }
-    // }
 };

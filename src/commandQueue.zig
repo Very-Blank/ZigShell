@@ -76,10 +76,10 @@ pub const CommandQueue = struct {
                                 j += 1;
                                 i = j + 1;
 
-                                self.set(.rAppend) catch return ParseError.SetFailed;
+                                self.set(.rOverride) catch return ParseError.SetFailed;
                                 state = .fileName;
                             } else {
-                                self.set(.rOverride) catch return ParseError.SetFailed;
+                                self.set(.rAppend) catch return ParseError.SetFailed;
                                 state = .fileName;
                             }
                         },
