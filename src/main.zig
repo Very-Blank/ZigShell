@@ -7,10 +7,11 @@ const Executer = @import("executer.zig").Executer;
 // TODO:
 // maybe change to execvpeZ to execveZ and get the absolute path yourself?
 
+var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
+
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer std.debug.print("{any}\n", .{gpa.deinit()});
-    const allocator = gpa.allocator();
+    defer std.debug.print("{any}\n", .{debug_allocator.deinit()});
+    const allocator = debug_allocator.allocator();
 
     const stdout = std.io.getStdIn().writer();
 

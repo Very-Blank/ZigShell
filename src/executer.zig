@@ -27,6 +27,7 @@ const ExecuteError = error{
     Dup2Failed,
     MissingFileName,
     MissingFilesNames,
+    FileDidNotExist,
 };
 
 pub fn isPipe(pipe: ?Operator) bool {
