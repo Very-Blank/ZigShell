@@ -1,3 +1,4 @@
+// FIXME: bad
 ///The string and the sentinel.
 pub fn cStrToSliceSentinel(cStr: [*:0]u8) []u8 {
     var i: u64 = 0;

@@ -1,15 +1,23 @@
 const std = @import("std");
 const Args = @import("args.zig").Args;
 
-pub const Operator = enum {
+pub const Op = enum {
+    none,
     pipe,
     rOverride,
     rAppend,
 };
 
+pub const Operator = union(Op) {
+    none,
+    pipe,
+    rOverride: []u8,
+    rAppend: []u8,
+};
+
 pub const Command = struct {
     args: Args,
-    operator: ?Operator,
+    operator: Operator,
 };
 
 const ParseError = error{
@@ -32,13 +40,13 @@ const State = enum {
     end,
 };
 
+// FIXME: DON'T MAKE NEW COMMAND BEFORE THE FILE NAME LEADS TO BUGs!
 pub const CommandQueue = struct {
     commands: ?[]Command,
-    fileNames: ?std.ArrayList([]u8),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) CommandQueue {
-        return .{ .commands = null, .fileNames = null, .allocator = allocator };
+        return .{ .commands = null, .allocator = allocator };
     }
 
     pub fn parse(self: *CommandQueue, buffer: []u8, sState: State) ParseError!void {
@@ -48,6 +56,7 @@ pub const CommandQueue = struct {
             else => {},
         }
 
+        // FIXME: change to labeled swtich?
         var i: u64 = 0;
         var j: u64 = 0;
         while (j < buffer.len) : (j += 1) {

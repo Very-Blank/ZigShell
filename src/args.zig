@@ -1,9 +1,9 @@
 const std = @import("std");
 const ArrayHelper = @import("arrayHelper.zig");
 
+// FIXME: BAD don't use C string they make my head hurt
 pub const Args = struct {
-    args: ?[*:null]?[*:0]u8,
-    len: u64,
+    args: [][]u8,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) Args {

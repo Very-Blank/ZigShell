@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const CommandQueue = @import("commandQueue.zig").CommandQueue;
 const InputReader = @import("inputReader.zig").InputReader;
 const Environ = @import("environ.zig").Environ;
@@ -10,8 +11,17 @@ const Executer = @import("executer.zig").Executer;
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !void {
-    defer std.debug.print("{any}\n", .{debug_allocator.deinit()});
-    const allocator = debug_allocator.allocator();
+    const allocator: std.mem.Allocator, const is_debug: bool = gpa: {
+        if (builtin.target.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
+        break :gpa switch (builtin.mode) {
+            .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
+            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
+        };
+    };
+
+    defer if (is_debug) {
+        std.debug.print("{any}\n", .{debug_allocator.deinit()});
+    };
 
     const stdout = std.io.getStdIn().writer();
 
