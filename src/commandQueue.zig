@@ -1,14 +1,14 @@
 const std = @import("std");
 const Args = @import("args.zig").Args;
 
-pub const Op = enum {
+pub const OperatorType = enum {
     none,
     pipe,
     rOverride,
     rAppend,
 };
 
-pub const Operator = union(Op) {
+pub const Operator = union(OperatorType) {
     none,
     pipe,
     rOverride: []u8,
