@@ -1,70 +1,57 @@
 const std = @import("std");
-const ArrayHelper = @import("arrayHelper.zig");
+const Vector = @import("vector.zig");
 
-// FIXME: BAD don't use C string they make my head hurt
 pub const Args = struct {
-    args: [][]u8,
+    list: [][]u8,
+    buffer: [][]u8,
+
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) Args {
-        return .{ .args = null, .len = 0, .allocator = allocator };
+    pub fn init(allocator: std.mem.Allocator) !Args {
+        const buffer = try allocator.alloc([]u8, 4);
+        return .{
+            .list = buffer[0..0],
+            .buffer = buffer,
+            .allocator = allocator,
+        };
     }
 
-    pub fn clear(self: *Args) void {
-        if (self.args) |cArgs| {
-            for (cArgs[0 .. self.len - 1]) |arg| {
-                if (arg) |cArg| {
-                    self.allocator.free(ArrayHelper.cStrToSliceSentinel(cArg));
-                }
-            }
-            self.allocator.free(cArgs[0..self.len]);
-            self.len = 0;
-            self.args = null;
+    pub fn deinit(self: *Args) void {
+        for (self.list.len) |cValue| {
+            self.allocator.free(cValue);
         }
     }
 
-    pub fn add(self: *Args, arg: []u8) !void {
-        if (self.args) |cArgs| {
-            const newArgument = try self.allocator.dupeZ(u8, arg);
-            errdefer self.allocator.free(newArgument);
-
-            const newArgs = try self.allocator.alloc(?[*:0]u8, self.len + 1);
-
-            for (0..self.len - 1) |j| {
-                if (cArgs[j]) |cArg| {
-                    newArgs[j] = cArg;
-                }
-            }
-
-            newArgs[self.len - 1] = newArgument;
-            newArgs[self.len] = null;
-
-            self.allocator.free(cArgs[0..self.len]);
-
-            self.args = newArgs[0..self.len :null];
-            self.len += 1;
+    pub fn add(self: *Args, value: []u8) !void {
+        const copy: []u8 = try self.allocator.alloc(u8, self.value.len);
+        @memcpy(copy, value);
+        if (self.list.len < self.buffer.len) {
+            self.list = self.buffer[0 .. self.list.len + 1];
+            self.list[self.list.len - 1] = copy;
         } else {
-            const newArgument = try self.allocator.dupeZ(u8, arg);
-            errdefer self.allocator.free(newArgument);
+            const buffer = try self.allocator.alloc([]u8, self.buffer.len * 2);
+            @memcpy(buffer[0..self.buffer.len], self.buffer);
+            self.allocator.free(self.buffer);
 
-            const newArgs = try self.allocator.alloc(?[*:0]u8, 2);
-
-            newArgs[0] = newArgument;
-            newArgs[1] = null;
-
-            self.args = newArgs[0..1 :null];
-            self.len = 2;
+            self.buffer = buffer;
+            // NOTE: values of list are invalid but the length should be okay?
+            self.list = self.buffer[0 .. self.list.len + 1];
+            self.list[self.list.len - 1] = copy;
         }
     }
 
-    pub fn print(self: *const Args) void {
-        if (self.args) |cArgs| {
-            std.debug.print("Args:\n", .{});
-            for (0..self.len) |i| {
-                if (cArgs[i]) |cArg| {
-                    std.debug.print("{any}. {s}\n", .{ i, cArg });
-                }
-            }
+    pub fn toArgs(self: *Args) ![:null]?[:0]u8 {
+        const buffer = try self.allocator.alloc(?[:0]u8, self.list.len + 1);
+        for (self.list, 0..) |cValue, i| {
+            const value = try self.allocator.alloc(u8, cValue.len + 1);
+            @memcpy(value[0..cValue.len], cValue);
+            buffer[i] = value[0..cValue.len :0];
         }
+
+        return buffer[0..self.list.len :null];
     }
+
+    pub fn freeArgs(){
+    }
+
 };
