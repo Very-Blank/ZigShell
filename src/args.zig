@@ -40,7 +40,7 @@ pub const Args = struct {
         }
     }
 
-    pub fn toArgs(self: *Args) ![:null]?[:0]u8 {
+    pub fn toCArgs(self: *Args) ![:null]?[:0]u8 {
         const buffer = try self.allocator.alloc(?[:0]u8, self.list.len + 1);
         for (self.list, 0..) |cValue, i| {
             const value = try self.allocator.alloc(u8, cValue.len + 1);
@@ -51,7 +51,13 @@ pub const Args = struct {
         return buffer[0..self.list.len :null];
     }
 
-    pub fn freeArgs(){
-    }
+    pub fn freeArgs(cArgs: [:null]?[:0]u8, allocator: std.mem.Allocator) void {
+        for (0..cArgs.len) |i| {
+            if (cArgs[i]) |cArg| {
+                allocator.free(cArg[0..cArg.len]);
+            }
+        }
 
+        allocator.free(cArgs[0..cArgs.len]);
+    }
 };
