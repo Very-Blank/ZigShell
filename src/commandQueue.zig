@@ -1,67 +1,64 @@
 const std = @import("std");
 const Args = @import("args.zig").Args;
+const OperatorType = @import("args.zig").OperatorType;
+const Operator = @import("args.zig").Operator;
 
-pub const OperatorType = enum {
-    none,
-    pipe,
-    rOverride,
-    rAppend,
+pub const TokenType = enum {
+    arg,
+    operator,
 };
 
-pub const Operator = union(OperatorType) {
-    none,
-    pipe,
-    rOverride: []u8,
-    rAppend: []u8,
-};
-
-pub const Command = struct {
-    args: Args,
-    operator: Operator,
-};
-
-const ParseError = error{
-    WrongStartState,
-    QuoteDidNotEnd,
-    OutOfMemory,
-    NoOperatorTarget,
-    NotNewCommandOperator,
-    ExpectedFile,
-    NoFile,
-    AddFailed,
-    NewFailed,
-    SetFailed,
+pub const Token = union(TokenType) {
+    arg: []u8,
+    operator: OperatorType,
 };
 
 const State = enum {
     normal,
-    nextNew,
     quote,
-    fileName,
-    end,
 };
 
-// FIXME: DON'T MAKE NEW COMMAND BEFORE THE FILE NAME LEADS TO BUGs!
 pub const CommandQueue = struct {
-    commands: ?[]Command,
+    commands: ?[]Args,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) CommandQueue {
         return .{ .commands = null, .allocator = allocator };
     }
 
-    pub fn parse(self: *CommandQueue, buffer: []u8, sState: State) ParseError!void {
-        std.debug.assert(sState != .end);
+    // Made this because it was too hard to just parse strings.
+    // This will be slower, but much easier to define safe behaviour.
+    /// Tokens will have pointers to buffer!
+    pub fn tokenize(self: *CommandQueue, buffer: []u8) ![]Token {
+        var tokens = std.ArrayList(Token).init(self.allocator);
+        errdefer tokens.deinit();
 
         var i: u64 = 0;
         var j: u64 = 0;
 
-        state: switch (sState) {
+        state: switch (State.normal) {
             .normal => {
                 switch (buffer[j]) {
-                    std.ascii.whitespace[0], std.ascii.whitespace[1], std.ascii.whitespace[2], std.ascii.whitespace[3], std.ascii.whitespace[4], std.ascii.whitespace[5], '"', ';', '>', '|' => {
+                    // zig fmt: off
+                    std.ascii.whitespace[0],
+                    std.ascii.whitespace[1],
+                    std.ascii.whitespace[2],
+                    std.ascii.whitespace[3],
+                    std.ascii.whitespace[4],
+                    std.ascii.whitespace[5] => {
+                    // zig fmt: on
                         if (j - i >= 1) {
-                            self.add(buffer[i..j]) catch return ParseError.AddFailed;
+                            try tokens.append(Token{ .arg = buffer[i..j] });
+                        }
+
+                        j += 1;
+                        i = j;
+
+                        if (j < buffer.len) continue :state .normal else return;
+                    },
+                    '"', ';', '>', '|' => {
+                        if (j - i >= 1) {
+                            try tokens.append(Token{ .arg = buffer[i..j] });
                         }
 
                         i = j + 1;
@@ -71,7 +68,7 @@ pub const CommandQueue = struct {
                         if (j < buffer.len) continue :state .normal else {
                             j -= 1;
                             if (j - i >= 1) {
-                                self.add(buffer[i..j]) catch return ParseError.AddFailed;
+                                try tokens.append(Token{ .arg = buffer[i..j] });
                             }
 
                             return;
@@ -82,193 +79,65 @@ pub const CommandQueue = struct {
                 switch (buffer[j]) {
                     '"' => {
                         j += 1;
-                        if (j < buffer.len) continue :state .qoute else return;
+                        if (j < buffer.len) continue :state .qoute else return error.TokenizeError;
                     },
                     ';' => {
+                        try tokens.append(Token{ .operator = OperatorType.seperator });
                         j += 1;
-                        if (j < buffer.len) continue :state .nextNew else return;
+                        if (j < buffer.len) continue :state .normal else return;
                     },
                     '>' => {
                         if (j + 1 < buffer.len and buffer[j + 1] == '>') {
-                            j += 1;
-                            if (j < buffer.len) continue :state .nextNew else return;
-                            j += 1;
-                            i = j + 1;
+                            try tokens.append(Token{ .operator = OperatorType.rAppend });
 
-                            self.set(.rAppend) catch return ParseError.SetFailed;
-                            state = .fileName;
+                            j += 2;
+                            i = j;
+
+                            if (j < buffer.len) continue :state .normal else return error.TokenizeError;
                         } else {
-                            self.set(.rOverride) catch return ParseError.SetFailed;
-                            state = .fileName;
+                            try tokens.append(Token{ .operator = OperatorType.rOverride });
+                            j += 1;
+
+                            if (j < buffer.len) continue :state .normal else return error.TokenizeError;
                         }
                     },
                     '|' => {
-                        self.set(.pipe) catch return ParseError.SetFailed;
-                        self.new() catch return ParseError.NewFailed;
+                        try tokens.append(Token{ .operator = OperatorType.pipe });
+
+                        j += 1;
+                        if (j < buffer.len) continue :state .normal else return error.TokenizeError;
                     },
-                    else => {},
+                    else => unreachable,
                 }
             },
-            .nextNew => {},
-            .qoute => {},
-            .fileName => {},
-            .end => {},
-        }
-
-        while (j < buffer.len) : (j += 1) {
-            switch (state) {
-                .normal => {},
-                .quote => {
-                    switch (buffer[j]) {
-                        '"' => {
-                            if (j - i >= 1) {
-                                self.add(buffer[i..j]) catch return ParseError.AddFailed;
-                            }
-                            i = j + 1;
-                            self.new() catch return ParseError.NewFailed;
-
-                            state = .normal;
-                        },
-                        else => {},
-                    }
-                },
-                .fileName => {
-                    switch (buffer[j]) {
-                        std.ascii.whitespace[0], std.ascii.whitespace[1], std.ascii.whitespace[2], std.ascii.whitespace[3], std.ascii.whitespace[4], std.ascii.whitespace[5] => {
-                            if (j - i >= 1) {
-                                if (self.fileNames) |*cFileNames| {
-                                    cFileNames.append(self.allocator.dupe(u8, buffer[i..j]) catch return ParseError.OutOfMemory) catch return ParseError.OutOfMemory;
-                                } else {
-                                    var fileNames = std.ArrayList([]u8).init(self.allocator);
-                                    fileNames.append(self.allocator.dupe(u8, buffer[i..j]) catch return ParseError.OutOfMemory) catch return ParseError.OutOfMemory;
-                                    self.fileNames = fileNames;
-                                }
-
-                                state = .end;
-                            }
-                            i = j + 1;
-                        },
-                        '"', ';', '>', '|' => {
-                            return ParseError.ExpectedFile;
-                        },
-                        else => {},
-                    }
-                },
-                .end => {
-                    switch (buffer[j]) {
-                        std.ascii.whitespace[0], std.ascii.whitespace[1], std.ascii.whitespace[2], std.ascii.whitespace[3], std.ascii.whitespace[4], std.ascii.whitespace[5] => {},
-                        ';' => {
-                            self.new() catch return ParseError.NewFailed;
-                            state = .normal;
-                        },
-                        else => return ParseError.NotNewCommandOperator,
-                    }
-                },
-            }
-        }
-
-        switch (state) {
             .quote => {
-                return ParseError.QuoteDidNotEnd;
-            },
-            .fileName => {
-                if (j - i >= 1) {
-                    if (self.fileNames) |*cFileNames| {
-                        cFileNames.append(self.allocator.dupe(u8, buffer[i..j]) catch return ParseError.OutOfMemory) catch return ParseError.OutOfMemory;
-                    } else {
-                        var fileNames = std.ArrayList([]u8).init(self.allocator);
-                        fileNames.append(self.allocator.dupe(u8, buffer[i..j]) catch return ParseError.OutOfMemory) catch return ParseError.OutOfMemory;
-                        self.fileNames = fileNames;
-                    }
+                if (buffer[j] == '"') {}
+                switch (buffer[j]) {
+                    '"' => {
+                        if (j - i >= 1) {
+                            try tokens.append(Token{ .arg = buffer[i..j] });
+                        }
 
-                    state = .end;
-                } else {
-                    return ParseError.NoFile;
-                }
-            },
-            else => {
-                if (j - i >= 1) {
-                    self.add(buffer[i..j]) catch return ParseError.AddFailed;
-                }
+                        j += 1;
+                        i = j;
 
-                i = j + 1;
-            },
-        }
-
-        if (self.commands) |cCommands| {
-            if (cCommands.len >= 2 and cCommands[cCommands.len - 1].args.args == null) {
-                if (cCommands[cCommands.len - 2].operator) |cOperator| {
-                    if (cOperator == Operator.pipe) {
-                        return ParseError.NoOperatorTarget;
-                    }
-                }
-            } else {
-                if (cCommands[cCommands.len - 1].operator) |cOperator| {
-                    if (cOperator == Operator.pipe) {
-                        return ParseError.NoOperatorTarget;
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn clear(self: *CommandQueue) void {
-        if (self.commands) |cCommands| {
-            for (cCommands) |*cCommand| {
-                cCommand.args.deinit();
-
-                switch (cCommand.operator) {
-                    .rOverride, .rAppend => |file| {
-                        self.allocator.free(file);
+                        if (j < buffer.len) continue :state .normal else return;
                     },
-                    else => {},
+                    else => {
+                        j += 1;
+                        if (j < buffer.len) continue :state .qoute else return error.TokenizeError;
+                    },
                 }
-            }
-
-            self.allocator.free(cCommands);
-            self.commands = null;
+            },
         }
+
+        return tokens.toOwnedSlice();
     }
 
-    pub fn new(self: *CommandQueue) !void {
-        if (self.commands) |cCommands| {
-            const newCommands = try self.allocator.alloc(Command, cCommands.len + 1);
-            @memcpy(newCommands[0..cCommands.len], cCommands);
-
-            newCommands[cCommands.len] = .{ .args = Args.init(self.allocator), .operator = null };
-
-            self.allocator.free(cCommands);
-            self.commands = newCommands;
-        } else {
-            return error.CommandsMissing;
-        }
-    }
-
-    pub fn set(self: *CommandQueue, operator: Operator) !void {
-        if (self.commands) |cCommands| {
-            if (cCommands[cCommands.len - 1].operator == null) {
-                if (cCommands[cCommands.len - 1].args.len >= 1) {
-                    cCommands[cCommands.len - 1].operator = operator;
-                } else {
-                    return error.NoArgs;
-                }
-            } else {
-                return error.TriedSettingOperatorTwice;
-            }
-        } else {
-            return error.CommandsMissing;
-        }
-    }
-
-    pub fn add(self: *CommandQueue, arg: []u8) !void {
-        if (self.commands) |cCommands| {
-            try cCommands[cCommands.len - 1].args.add(arg);
-        } else {
-            const newCommands = try self.allocator.alloc(Command, 1);
-            errdefer self.allocator.free(newCommands);
-            newCommands[0] = .{ .args = Args.init(self.allocator), .operator = null };
-            try newCommands[0].args.add(arg);
-            self.commands = newCommands;
+    pub fn parseTokens(self: *CommandQueue, tokens: []Token) !void {
+        for (0..tokens.len) |i| {
+            const currentToken: Token = tokens[i];
+            const nextToken: ?Token = if (i + 1 < tokens.len) tokens[i] else null;
         }
     }
 };

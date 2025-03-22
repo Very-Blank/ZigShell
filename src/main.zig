@@ -5,9 +5,6 @@ const InputReader = @import("inputReader.zig").InputReader;
 const Environ = @import("environ.zig").Environ;
 const Executer = @import("executer.zig").Executer;
 
-// TODO:
-// maybe change to execvpeZ to execveZ and get the absolute path yourself?
-
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !void {

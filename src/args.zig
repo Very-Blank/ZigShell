@@ -1,48 +1,61 @@
 const std = @import("std");
 const Vector = @import("vector.zig");
 
-pub const Args = struct {
-    list: [][]u8,
-    buffer: [][]u8,
+pub const OperatorType = enum {
+    none,
+    pipe,
+    rOverride,
+    rAppend,
+};
 
+pub const Operator = union(OperatorType) {
+    none,
+    seperator,
+    pipe,
+    rOverride: []u8,
+    rAppend: []u8,
+};
+
+pub const Args = struct {
+    args: std.ArrayList([]u8),
+    operator: Operator,
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) !Args {
-        const buffer = try allocator.alloc([]u8, 4);
+    pub fn init(allocator: std.mem.Allocator) Args {
         return .{
-            .list = buffer[0..0],
-            .buffer = buffer,
+            .args = std.ArrayList([]u8).init(allocator),
+            .operator = .{ .none = void },
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *Args) void {
-        for (self.list.len) |cValue| {
+        for (self.args.items) |cValue| {
             self.allocator.free(cValue);
+        }
+
+        self.args.deinit();
+
+        switch (self.operator) {
+            .rOverride, .rAppend => |cValue| {
+                self.allocator.free(cValue);
+            },
+            else => {},
         }
     }
 
-    pub fn add(self: *Args, value: []u8) !void {
-        const copy: []u8 = try self.allocator.alloc(u8, self.value.len);
-        @memcpy(copy, value);
-        if (self.list.len < self.buffer.len) {
-            self.list = self.buffer[0 .. self.list.len + 1];
-            self.list[self.list.len - 1] = copy;
+    /// Expects that the operator owns the values memory.
+    pub fn setOperator(self: *Args, operator: Operator) !void {
+        if (self.operator == .none) {
+            self.operator = operator;
         } else {
-            const buffer = try self.allocator.alloc([]u8, self.buffer.len * 2);
-            @memcpy(buffer[0..self.buffer.len], self.buffer);
-            self.allocator.free(self.buffer);
-
-            self.buffer = buffer;
-            // NOTE: values of list are invalid but the length should be okay?
-            self.list = self.buffer[0 .. self.list.len + 1];
-            self.list[self.list.len - 1] = copy;
+            return error.SetOperatorTwice;
         }
     }
 
     pub fn toCArgs(self: *Args) ![:null]?[:0]u8 {
-        const buffer = try self.allocator.alloc(?[:0]u8, self.list.len + 1);
-        for (self.list, 0..) |cValue, i| {
+        const buffer = try self.allocator.alloc(?[:0]u8, self.args.items.len + 1);
+        for (self.args.items, 0..) |cValue, i| {
             const value = try self.allocator.alloc(u8, cValue.len + 1);
             @memcpy(value[0..cValue.len], cValue);
             buffer[i] = value[0..cValue.len :0];
