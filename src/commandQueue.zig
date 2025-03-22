@@ -35,6 +35,7 @@ const ParseError = error{
 
 const State = enum {
     normal,
+    nextNew,
     quote,
     fileName,
     end,
@@ -50,55 +51,73 @@ pub const CommandQueue = struct {
     }
 
     pub fn parse(self: *CommandQueue, buffer: []u8, sState: State) ParseError!void {
-        var state = sState;
-        switch (state) {
-            .end => return ParseError.WrongStartState,
-            else => {},
-        }
+        std.debug.assert(sState != .end);
 
-        // FIXME: change to labeled swtich?
         var i: u64 = 0;
         var j: u64 = 0;
-        while (j < buffer.len) : (j += 1) {
-            switch (state) {
-                .normal => {
-                    switch (buffer[j]) {
-                        std.ascii.whitespace[0], std.ascii.whitespace[1], std.ascii.whitespace[2], std.ascii.whitespace[3], std.ascii.whitespace[4], std.ascii.whitespace[5], '"', ';', '>', '|' => {
+
+        state: switch (sState) {
+            .normal => {
+                switch (buffer[j]) {
+                    std.ascii.whitespace[0], std.ascii.whitespace[1], std.ascii.whitespace[2], std.ascii.whitespace[3], std.ascii.whitespace[4], std.ascii.whitespace[5], '"', ';', '>', '|' => {
+                        if (j - i >= 1) {
+                            self.add(buffer[i..j]) catch return ParseError.AddFailed;
+                        }
+
+                        i = j + 1;
+                    },
+                    else => {
+                        j += 1;
+                        if (j < buffer.len) continue :state .normal else {
+                            j -= 1;
                             if (j - i >= 1) {
                                 self.add(buffer[i..j]) catch return ParseError.AddFailed;
                             }
 
+                            return;
+                        }
+                    },
+                }
+
+                switch (buffer[j]) {
+                    '"' => {
+                        j += 1;
+                        if (j < buffer.len) continue :state .qoute else return;
+                    },
+                    ';' => {
+                        j += 1;
+                        if (j < buffer.len) continue :state .nextNew else return;
+                    },
+                    '>' => {
+                        if (j + 1 < buffer.len and buffer[j + 1] == '>') {
+                            j += 1;
+                            if (j < buffer.len) continue :state .nextNew else return;
+                            j += 1;
                             i = j + 1;
-                        },
-                        else => {},
-                    }
 
-                    switch (buffer[j]) {
-                        '"' => {
-                            state = .quote;
-                        },
-                        ';' => {
-                            self.new() catch return ParseError.NewFailed;
-                        },
-                        '>' => {
-                            if (j + 1 < buffer.len and buffer[j + 1] == '>') {
-                                j += 1;
-                                i = j + 1;
+                            self.set(.rAppend) catch return ParseError.SetFailed;
+                            state = .fileName;
+                        } else {
+                            self.set(.rOverride) catch return ParseError.SetFailed;
+                            state = .fileName;
+                        }
+                    },
+                    '|' => {
+                        self.set(.pipe) catch return ParseError.SetFailed;
+                        self.new() catch return ParseError.NewFailed;
+                    },
+                    else => {},
+                }
+            },
+            .nextNew => {},
+            .qoute => {},
+            .fileName => {},
+            .end => {},
+        }
 
-                                self.set(.rOverride) catch return ParseError.SetFailed;
-                                state = .fileName;
-                            } else {
-                                self.set(.rAppend) catch return ParseError.SetFailed;
-                                state = .fileName;
-                            }
-                        },
-                        '|' => {
-                            self.set(.pipe) catch return ParseError.SetFailed;
-                            self.new() catch return ParseError.NewFailed;
-                        },
-                        else => {},
-                    }
-                },
+        while (j < buffer.len) : (j += 1) {
+            switch (state) {
+                .normal => {},
                 .quote => {
                     switch (buffer[j]) {
                         '"' => {
@@ -196,19 +215,18 @@ pub const CommandQueue = struct {
     pub fn clear(self: *CommandQueue) void {
         if (self.commands) |cCommands| {
             for (cCommands) |*cCommand| {
-                cCommand.args.clear();
+                cCommand.args.deinit();
+
+                switch (cCommand.operator) {
+                    .rOverride, .rAppend => |file| {
+                        self.allocator.free(file);
+                    },
+                    else => {},
+                }
             }
 
             self.allocator.free(cCommands);
             self.commands = null;
-        }
-
-        if (self.fileNames) |cFileNames| {
-            for (cFileNames.items) |item| {
-                self.allocator.free(item);
-            }
-            cFileNames.deinit();
-            self.fileNames = null;
         }
     }
 
