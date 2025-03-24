@@ -3,6 +3,7 @@ const Vector = @import("vector.zig");
 
 pub const OperatorType = enum {
     none,
+    seperator,
     pipe,
     rOverride,
     rAppend,
@@ -10,7 +11,6 @@ pub const OperatorType = enum {
 
 pub const Operator = union(OperatorType) {
     none,
-    seperator,
     pipe,
     rOverride: []u8,
     rAppend: []u8,
@@ -27,6 +27,12 @@ pub const Args = struct {
             .operator = .{ .none = void },
             .allocator = allocator,
         };
+    }
+
+    pub fn add(self: *Args, arg: []u8) !void {
+        const value = try self.allocator.alloc(u8, arg.len);
+        @memcpy(value, arg);
+        self.args.append(value);
     }
 
     pub fn deinit(self: *Args) void {
@@ -49,7 +55,7 @@ pub const Args = struct {
         if (self.operator == .none) {
             self.operator = operator;
         } else {
-            return error.SetOperatorTwice;
+            return error.OperatorSetTwice;
         }
     }
 

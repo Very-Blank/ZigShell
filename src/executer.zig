@@ -64,23 +64,34 @@ pub const Executer = struct {
         var currentFile: u64 = 0;
 
         if (commandQueue.commands) |cCommands| {
-            for (cCommands) |command| {
-                if (command.args.len <= 1) continue;
+            var i: u64 = 0;
 
-                const cArgs: [*:null]?[*:0]u8 = if (command.args.args) |value| value else continue;
-                const cPath = if (cArgs[0]) |value| value else continue;
 
-                if (self.hashmap.get(ArrayHelper.cStrToSlice(cPath))) |builtin| {
+            while (i < cCommands.items.len) i += 1 {
+                const 
+            }
+            // FIXME: Write this is while loop.
+            //        Change how to lastOperator works, it should be set in each loop to avoid bugs!
+            for (cCommands.items) |cArgs| {
+                const args: [][]u8 = cArgs.args.items;
+
+                // NOTE: Bug allert!
+                std.debug.assert(args.len != 0);
+
+                // const cArgs: [*:null]?[*:0]u8 = if (command.args.args) |value| value else continue;
+                // const cPath = if (cArgs[0]) |value| value else continue;
+
+                // NOTE: I would really want to guarantee at the point that these would run successfully,
+                //       but that would also make the code more complicated than need be.
+
+                if (self.hashmap.get(args[0])) |builtin| {
                     switch (builtin) {
                         .exit => {
                             return error.Exit;
                         },
                         .cd => {
-                            if (command.args.len != 3) return error.InvalidPath;
-
-                            const cfilePath = if (cArgs[1]) |value| value else return error.PathWasNull;
-
-                            std.posix.chdir(ArrayHelper.cStrToSlice(cfilePath)) catch return error.ChangeDirError;
+                            if (args.len != 1) return error.InvalidPath;
+                            std.posix.chdir(args[0]) catch return error.ChangeDirError;
 
                             continue;
                         },

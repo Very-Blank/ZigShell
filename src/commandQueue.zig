@@ -19,11 +19,21 @@ const State = enum {
 };
 
 pub const CommandQueue = struct {
-    commands: ?[]Args,
+    commands: ?std.ArrayList(Args),
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) CommandQueue {
         return .{ .commands = null, .allocator = allocator };
+    }
+
+    pub fn deinit(self: *CommandQueue) void {
+        if (self.commands) |cCommands| {
+            for (cCommands.items) |cArg| {
+                cArg.deinit();
+            }
+        }
+
+        self.commands = null;
     }
 
     // Made this because it was too hard to just parse strings.
@@ -35,7 +45,8 @@ pub const CommandQueue = struct {
 
         var i: u64 = 0;
         var j: u64 = 0;
-
+        // NOTE: Although a labed swtich seem like a weird choice,
+        //       it allows the code the be more thorough on what is allowed to happen next.
         state: switch (State.normal) {
             .normal => {
                 switch (buffer[j]) {
@@ -135,9 +146,130 @@ pub const CommandQueue = struct {
     }
 
     pub fn parseTokens(self: *CommandQueue, tokens: []Token) !void {
-        for (0..tokens.len) |i| {
+        // If any error happens, commands are invalid!
+        errdefer {
+            self.deinit();
+        }
+
+        var i = 0;
+        while (i < tokens.len) : (i += 1) {
             const currentToken: Token = tokens[i];
-            const nextToken: ?Token = if (i + 1 < tokens.len) tokens[i] else null;
+            const nextToken: ?Token = if (i + 1 < tokens.len) tokens[i + 1] else null;
+            const thirdToken: ?Token = if (i + 2 < tokens.len) tokens[i + 2] else null;
+
+            switch (currentToken) {
+                .arg => |arg| {
+                    try self.addArg(arg);
+                },
+                .operator => |operator| {
+                    switch (operator) {
+                        .seperator => {
+                            // NOTE: This way we don't end up with empty args!
+                            //       Note that we don't set opperator here!
+                            if (nextToken) |cNextToken| {
+                                switch (cNextToken) {
+                                    .arg => |arg| {
+                                        try self.newArg();
+                                        try self.addArg(arg);
+
+                                        i += 1;
+                                        continue;
+                                    },
+                                    else => return error.SyntaxError,
+                                }
+                            } else {
+                                return error.SyntaxError;
+                            }
+                        },
+                        .pipe => {
+                            if (nextToken) |cNextToken| {
+                                switch (cNextToken) {
+                                    .arg => |arg| {
+                                        try self.setArg(Operator{ .pipe = void });
+                                        try self.newArg();
+                                        try self.addArg(arg);
+
+                                        i += 1;
+                                        continue;
+                                    },
+                                    else => return error.NoWhereToPipe,
+                                }
+                            } else {
+                                return error.NoWhereToPipe;
+                            }
+                        },
+                        .rOverride, .rAppend => {
+                            if (nextToken) |cNextToken| {
+                                switch (cNextToken) {
+                                    .arg => |cArg| {
+                                        switch (currentToken) {
+                                            .rOverride => try setFileOperator(.rOverride, self, cArg),
+                                            .rAppend => try setFileOperator(.rAppend, self, cArg),
+                                            else => unreachable,
+                                        }
+
+                                        // NOTE: Horrible that we have to check the third token but we just have to.
+                                        //       This is the most "clean" way to do this.
+                                        if (thirdToken) |cThirdToken| {
+                                            switch (cThirdToken) {
+                                                .seperator => {},
+                                                else => return error.SyntaxError,
+                                            }
+                                        }
+
+                                        i += 1;
+                                        continue;
+                                    },
+                                    else => return error.NoFile,
+                                }
+                            } else {
+                                return error.NoFile;
+                            }
+                        },
+                        else => unreachable, // NOTE: None would be a bug.
+                    }
+                },
+            }
+        }
+    }
+
+    pub fn setFileOperator(comptime T: OperatorType, self: *CommandQueue, arg: []u8) !void {
+        const value = try self.allocator.alloc(u8, arg.len);
+        @memcpy(value, arg);
+        errdefer self.allocator.free(value);
+        switch (T) {
+            .rOverride => {
+                try self.setArg(Operator{ .rOverride = value });
+            },
+            .rAppend => {
+                try self.setArg(Operator{ .rAppend = value });
+            },
+            else => @compileError("OperatorType " ++ @typeName(T) ++ " is not supported"),
+        }
+    }
+
+    pub fn setArg(self: *CommandQueue, operator: Operator) !void {
+        if (self.commands) |cArgs| {
+            try cArgs.items[cArgs.items.len].setOperator(operator);
+        } else {
+            return error.NoArgs;
+        }
+    }
+
+    pub fn newArg(self: *CommandQueue) !void {
+        if (self.commands) |cCommands| {
+            try cCommands.items.append(Args.init(self.allocator));
+        } else {
+            const list = std.ArrayList(Args).init();
+            self.commands = list;
+        }
+    }
+
+    pub fn addArg(self: *CommandQueue, arg: []u8) !void {
+        if (self.commands) |cCommands| {
+            try cCommands.items[cCommands.items.len - 1].add(arg);
+        } else {
+            return error.NoCommands;
         }
     }
 };
