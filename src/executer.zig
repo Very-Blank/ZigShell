@@ -57,7 +57,6 @@ pub const Executer = struct {
     }
 
     pub fn executeCommands(self: *const Executer, commandQueue: *const CommandQueue, environ: *const Environ) ExecuteError!void {
-        var lastOperator: ?Operator = null;
         var p: [2]std.posix.fd_t = .{ 0, 0 };
         var pid: std.posix.pid_t = 0;
         var fd_in: std.posix.fd_t = std.posix.STDIN_FILENO;
@@ -66,32 +65,21 @@ pub const Executer = struct {
         if (commandQueue.commands) |cCommands| {
             var i: u64 = 0;
 
-
-            while (i < cCommands.items.len) i += 1 {
-                const 
-            }
-            // FIXME: Write this is while loop.
-            //        Change how to lastOperator works, it should be set in each loop to avoid bugs!
-            for (cCommands.items) |cArgs| {
-                const args: [][]u8 = cArgs.args.items;
+            while (i < cCommands.items.len) : (i += 1) {
+                const args: Args = cCommands.items[i];
+                const lastOperator: ?Operator = if (i > 0) cCommands.items[i].operator else null;
 
                 // NOTE: Bug allert!
-                std.debug.assert(args.len != 0);
+                std.debug.assert(args.args.items.len != 0);
 
-                // const cArgs: [*:null]?[*:0]u8 = if (command.args.args) |value| value else continue;
-                // const cPath = if (cArgs[0]) |value| value else continue;
-
-                // NOTE: I would really want to guarantee at the point that these would run successfully,
-                //       but that would also make the code more complicated than need be.
-
-                if (self.hashmap.get(args[0])) |builtin| {
+                if (self.hashmap.get(args.args.items[0])) |builtin| {
                     switch (builtin) {
                         .exit => {
                             return error.Exit;
                         },
                         .cd => {
                             if (args.len != 1) return error.InvalidPath;
-                            std.posix.chdir(args[0]) catch return error.ChangeDirError;
+                            std.posix.chdir(args.args.items[1]) catch return error.ChangeDirError;
 
                             continue;
                         },
@@ -114,7 +102,7 @@ pub const Executer = struct {
                         std.posix.dup2(fd_in, std.posix.STDIN_FILENO) catch return error.Dup2Failed;
                     }
 
-                    if (command.operator) |cOperator| {
+                    if (args.operator) |cOperator| {
                         switch (cOperator) {
                             .pipe => {
                                 std.posix.dup2(p[1], std.posix.STDOUT_FILENO) catch return error.Dup2Failed;
