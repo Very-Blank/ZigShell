@@ -30,10 +30,6 @@ const ExecuteError = error{
     FileDidNotExist,
 };
 
-pub fn isPipe(pipe: ?Operator) bool {
-    return if (pipe) |cPipe| return cPipe == .pipe else return false;
-}
-
 pub const Executer = struct {
     hashmap: std.StringHashMap(Builtins),
     allocator: std.mem.Allocator,
@@ -67,7 +63,7 @@ pub const Executer = struct {
 
             while (i < cCommands.items.len) : (i += 1) {
                 const args: Args = cCommands.items[i];
-                const lastOperator: ?Operator = if (i > 0) cCommands.items[i].operator else null;
+                const lastOperator: Operator = if (i > 0) cCommands.items[i].operator else Operator{ .none = void };
 
                 // NOTE: Bug allert!
                 std.debug.assert(args.args.items.len != 0);
@@ -91,14 +87,14 @@ pub const Executer = struct {
                     }
                 }
 
-                if (isPipe(command.operator) or isPipe(lastOperator)) {
+                if (args.operator == .pipe or lastOperator == .pipe) {
                     p = std.posix.pipe() catch return error.PipeFailed;
                 }
 
                 pid = @intCast(std.posix.fork() catch return error.ForkFailed);
 
                 if (pid == 0) {
-                    if (isPipe(lastOperator)) {
+                    if (lastOperator == .pipe) {
                         std.posix.dup2(fd_in, std.posix.STDIN_FILENO) catch return error.Dup2Failed;
                     }
 
@@ -141,6 +137,7 @@ pub const Executer = struct {
                                     return error.MissingFilesNames;
                                 }
                             },
+                            else => {},
                         }
                     }
 
