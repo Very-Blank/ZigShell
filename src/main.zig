@@ -26,7 +26,7 @@ pub fn main() !void {
     defer inputReader.clear();
 
     var commandQueue: CommandQueue = CommandQueue.init(allocator);
-    defer commandQueue.clear();
+    defer commandQueue.deinit();
 
     const environ: Environ = try Environ.init(std.os.environ, allocator);
     defer environ.deinit();
@@ -70,6 +70,6 @@ pub fn main() !void {
         };
 
         inputReader.clear();
-        commandQueue.clear();
+        commandQueue.deinit();
     }
 }

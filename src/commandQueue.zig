@@ -36,6 +36,8 @@ pub const CommandQueue = struct {
         self.commands = null;
     }
 
+    // FIXME: add parse
+
     // Made this because it was too hard to just parse strings.
     // This will be slower, but much easier to define safe behaviour.
     /// Tokens will have pointers to buffer!

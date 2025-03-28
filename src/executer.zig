@@ -56,7 +56,6 @@ pub const Executer = struct {
         var p: [2]std.posix.fd_t = .{ 0, 0 };
         var pid: std.posix.pid_t = 0;
         var fd_in: std.posix.fd_t = std.posix.STDIN_FILENO;
-        var currentFile: u64 = 0;
 
         if (commandQueue.commands) |cCommands| {
             var i: u64 = 0;
@@ -74,7 +73,7 @@ pub const Executer = struct {
                             return error.Exit;
                         },
                         .cd => {
-                            if (args.len != 1) return error.InvalidPath;
+                            if (args.len != 2) return error.InvalidPath;
                             std.posix.chdir(args.args.items[1]) catch return error.ChangeDirError;
 
                             continue;
@@ -83,7 +82,6 @@ pub const Executer = struct {
                             // FIXME: add some help info
                             continue;
                         },
-                        // else => unreachable,
                     }
                 }
 
@@ -98,54 +96,41 @@ pub const Executer = struct {
                         std.posix.dup2(fd_in, std.posix.STDIN_FILENO) catch return error.Dup2Failed;
                     }
 
-                    if (args.operator) |cOperator| {
-                        switch (cOperator) {
-                            .pipe => {
-                                std.posix.dup2(p[1], std.posix.STDOUT_FILENO) catch return error.Dup2Failed;
-                            },
-                            .rOverride => {
-                                if (commandQueue.fileNames) |cFileNames| {
-                                    if (currentFile < cFileNames.items.len) {
-                                        const file = std.fs.cwd().createFile(cFileNames.items[currentFile], .{}) catch return error.FailedToOpenFile;
-                                        currentFile += 1;
+                    switch (args.operator) {
+                        .pipe => {
+                            std.posix.dup2(p[1], std.posix.STDOUT_FILENO) catch return error.Dup2Failed;
+                        },
+                        // Look at this sexy code, god damn.
+                        // The token parsing was worth it!
+                        // No guessing if we have a file!
+                        .rOverride => |filename| {
+                            const file = std.fs.cwd().createFile(filename, .{}) catch return error.FailedToOpenFile;
 
-                                        std.posix.dup2(
-                                            file.handle,
-                                            std.posix.STDOUT_FILENO,
-                                        ) catch return error.Dup2Failed;
-                                    } else {
-                                        return error.MissingFileName;
-                                    }
-                                } else {
-                                    return error.MissingFilesNames;
-                                }
-                            },
-                            .rAppend => {
-                                if (commandQueue.fileNames) |cFileNames| {
-                                    if (currentFile < cFileNames.items.len) {
-                                        const file = std.fs.cwd().createFile(cFileNames.items[currentFile], .{}) catch return error.FileDidNotExist;
-                                        currentFile += 1;
+                            std.posix.dup2(
+                                file.handle,
+                                std.posix.STDOUT_FILENO,
+                            ) catch return error.Dup2Failed;
+                        },
+                        // FIXME: change this so it actually appends
+                        .rAppend => |filename| {
+                            const file = std.fs.cwd().createFile(filename, .{}) catch return error.FileDidNotExist;
 
-                                        std.posix.dup2(
-                                            file.handle,
-                                            std.posix.STDOUT_FILENO,
-                                        ) catch return error.Dup2Failed;
-                                    } else {
-                                        return error.MissingFileName;
-                                    }
-                                } else {
-                                    return error.MissingFilesNames;
-                                }
-                            },
-                            else => {},
-                        }
+                            std.posix.dup2(
+                                file.handle,
+                                std.posix.STDOUT_FILENO,
+                            ) catch return error.Dup2Failed;
+                        },
+                        else => {},
                     }
 
-                    if (isPipe(command.operator) or isPipe(lastOperator)) {
+                    if (args.operator == .pipe or lastOperator == .pipe) {
                         std.posix.close(p[0]);
                     }
 
-                    const errors = std.posix.execvpeZ(cPath, cArgs, environ.variables);
+                    const cArgs = try args.getCArgs();
+                    defer cArgs.deinit();
+
+                    const errors = std.posix.execvpeZ(cArgs.file, cArgs.argv, environ.variables);
                     std.debug.print("{any}\n", .{errors});
                     return error.ChildExit;
                 } else if (pid < 0) {
@@ -156,12 +141,10 @@ pub const Executer = struct {
                         wait = std.posix.waitpid(pid, std.posix.W.UNTRACED);
                     }
 
-                    if (isPipe(command.operator) or isPipe(lastOperator)) {
+                    if (args.operator == .pipe or lastOperator == .pipe) {
                         std.posix.close(p[1]);
                         fd_in = p[0];
                     }
-
-                    lastOperator = command.operator;
                 }
             }
         }

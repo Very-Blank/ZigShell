@@ -1,5 +1,4 @@
 const std = @import("std");
-const Vector = @import("vector.zig");
 
 pub const OperatorType = enum {
     none,
@@ -11,6 +10,7 @@ pub const OperatorType = enum {
 
 pub const Operator = union(OperatorType) {
     none,
+    seperator,
     pipe,
     rOverride: []u8,
     rAppend: []u8,
@@ -29,13 +29,7 @@ pub const Args = struct {
         };
     }
 
-    pub fn add(self: *Args, arg: []u8) !void {
-        const value = try self.allocator.alloc(u8, arg.len);
-        @memcpy(value, arg);
-        self.args.append(value);
-    }
-
-    pub fn deinit(self: *Args) void {
+    pub fn deinit(self: *const Args) void {
         for (self.args.items) |cValue| {
             self.allocator.free(cValue);
         }
@@ -50,6 +44,12 @@ pub const Args = struct {
         }
     }
 
+    pub fn add(self: *Args, arg: []u8) !void {
+        const value = try self.allocator.alloc(u8, arg.len);
+        @memcpy(value, arg);
+        self.args.append(value);
+    }
+
     /// Expects that the operator owns the values memory.
     pub fn setOperator(self: *Args, operator: Operator) !void {
         if (self.operator == .none) {
@@ -59,24 +59,45 @@ pub const Args = struct {
         }
     }
 
-    pub fn toCArgs(self: *Args) ![:null]?[:0]u8 {
-        const buffer = try self.allocator.alloc(?[:0]u8, self.args.items.len + 1);
-        for (self.args.items, 0..) |cValue, i| {
-            const value = try self.allocator.alloc(u8, cValue.len + 1);
+    pub fn getCArgs(self: *Args) !CArgs {
+        return try CArgs.init(self);
+    }
+};
+
+pub const CArgs = struct {
+    file: [*:0]const u8,
+    argv: [*:null]const ?[*:0]const u8,
+
+    allocator: std.mem.Allocator,
+
+    pub fn init(args: *Args) !CArgs {
+        const file = try args.allocator.alloc(u8, args.args.items[0].len + 1);
+        // NOTE: that at least args.args.items[0] is guaranteed.
+        // If this ever panics we have a bad bug in tokenizer!
+        @memcpy(file[0 .. file.len - 1], args.args.items[0]);
+
+        const buffer = try args.allocator.alloc(?[:0]u8, args.args.items.len + 1);
+        for (args.args.items, 0..) |cValue, i| {
+            const value = try args.allocator.alloc(u8, cValue.len + 1);
             @memcpy(value[0..cValue.len], cValue);
             buffer[i] = value[0..cValue.len :0];
         }
 
-        return buffer[0..self.list.len :null];
+        return .{
+            .file = file[0..file.len :0],
+            .argv = buffer[0..args.list.len :null],
+            .allocator = args.allocator,
+        };
     }
 
-    pub fn freeArgs(cArgs: [:null]?[:0]u8, allocator: std.mem.Allocator) void {
-        for (0..cArgs.len) |i| {
-            if (cArgs[i]) |cArg| {
-                allocator.free(cArg[0..cArg.len]);
+    pub fn deinit(self: *const CArgs) void {
+        for (0..self.argv.len) |i| {
+            if (self.argv[i]) |cArg| {
+                self.allocator.free(cArg[0..cArg.len]);
             }
         }
 
-        allocator.free(cArgs[0..cArgs.len]);
+        self.allocator.free(self.argv[0..self.argv.len]);
+        self.allocator.free(self.file[0..self.file.len]);
     }
 };
