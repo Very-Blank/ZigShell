@@ -37,6 +37,7 @@ pub const CommandQueue = struct {
     }
 
     // FIXME: add parse
+    pub fn parse(buffer: []u8) void {}
 
     // Made this because it was too hard to just parse strings.
     // This will be slower, but much easier to define safe behaviour.
