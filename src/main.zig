@@ -34,26 +34,22 @@ pub fn main() !void {
     var executer: Executer = try Executer.init(allocator);
     defer executer.deinit();
 
-    var delimeter: u8 = '\n';
+    // var delimeter: u8 = '\n';
 
     while (true) {
         _ = try stdout.write(" > ");
-        while (true) {
-            try inputReader.read(delimeter);
+        inputReader.read('\n') catch {
+            continue;
+        };
 
-            commandQueue.parse(if (inputReader.buffer) |cBuffer| cBuffer else return error.NoArguments, .normal) catch |err| {
-                switch (err) {
-                    error.QuoteDidNotEnd => {
-                        delimeter = '"';
-                        inputReader.clear();
-                        continue;
-                    },
-                    else => return err,
-                }
-            };
-
-            break;
-        }
+        commandQueue.parse(if (inputReader.buffer) |cBuffer| cBuffer else {
+            inputReader.clear();
+            commandQueue.deinit();
+            _ = try stdout.write("Expected input, but there was none.");
+            continue;
+        }) catch {
+            _ = try stdout.write("SyntaxError");
+        };
 
         //args.print();
 

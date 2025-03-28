@@ -31,13 +31,18 @@ pub const CommandQueue = struct {
             for (cCommands.items) |cArg| {
                 cArg.deinit();
             }
+
+            cCommands.deinit();
         }
 
         self.commands = null;
     }
 
-    // FIXME: add parse
-    pub fn parse(buffer: []u8) void {}
+    pub fn parse(self: *CommandQueue, buffer: []u8) !void {
+        const tokens = try self.tokenize(buffer);
+        defer self.allocator.free(tokens);
+        try self.parseTokens(tokens);
+    }
 
     // Made this because it was too hard to just parse strings.
     // This will be slower, but much easier to define safe behaviour.
@@ -68,7 +73,7 @@ pub const CommandQueue = struct {
                         j += 1;
                         i = j;
 
-                        if (j < buffer.len) continue :state .normal else return;
+                        if (j < buffer.len) continue :state .normal else break :state;
                     },
                     '"', ';', '>', '|' => {
                         if (j - i >= 1) {
@@ -80,12 +85,11 @@ pub const CommandQueue = struct {
                     else => {
                         j += 1;
                         if (j < buffer.len) continue :state .normal else {
-                            j -= 1;
                             if (j - i >= 1) {
                                 try tokens.append(Token{ .arg = buffer[i..j] });
                             }
 
-                            return;
+                            break :state;
                         }
                     },
                 }
@@ -93,12 +97,12 @@ pub const CommandQueue = struct {
                 switch (buffer[j]) {
                     '"' => {
                         j += 1;
-                        if (j < buffer.len) continue :state .qoute else return error.TokenizeError;
+                        if (j < buffer.len) continue :state .quote else return error.TokenizeError;
                     },
                     ';' => {
                         try tokens.append(Token{ .operator = OperatorType.seperator });
                         j += 1;
-                        if (j < buffer.len) continue :state .normal else return;
+                        if (j < buffer.len) continue :state .normal else break :state;
                     },
                     '>' => {
                         if (j + 1 < buffer.len and buffer[j + 1] == '>') {
@@ -135,11 +139,11 @@ pub const CommandQueue = struct {
                         j += 1;
                         i = j;
 
-                        if (j < buffer.len) continue :state .normal else return;
+                        if (j < buffer.len) continue :state .normal else break :state;
                     },
                     else => {
                         j += 1;
-                        if (j < buffer.len) continue :state .qoute else return error.TokenizeError;
+                        if (j < buffer.len) continue :state .quote else return error.TokenizeError;
                     },
                 }
             },
@@ -154,7 +158,16 @@ pub const CommandQueue = struct {
             self.deinit();
         }
 
-        var i = 0;
+        var i: u64 = 0;
+        switch (tokens[i]) {
+            .arg => |arg| {
+                try self.newArg();
+                try self.addArg(arg);
+                i += 1;
+            },
+            else => return error.SyntaxError,
+        }
+
         while (i < tokens.len) : (i += 1) {
             const currentToken: Token = tokens[i];
             const nextToken: ?Token = if (i + 1 < tokens.len) tokens[i + 1] else null;
@@ -188,7 +201,7 @@ pub const CommandQueue = struct {
                             if (nextToken) |cNextToken| {
                                 switch (cNextToken) {
                                     .arg => |arg| {
-                                        try self.setArg(Operator{ .pipe = void });
+                                        try self.setArg(Operator.pipe);
                                         try self.newArg();
                                         try self.addArg(arg);
 
@@ -206,8 +219,11 @@ pub const CommandQueue = struct {
                                 switch (cNextToken) {
                                     .arg => |cArg| {
                                         switch (currentToken) {
-                                            .rOverride => try setFileOperator(.rOverride, self, cArg),
-                                            .rAppend => try setFileOperator(.rAppend, self, cArg),
+                                            .operator => |nextOperator| switch (nextOperator) {
+                                                .rOverride => try setFileOperator(.rOverride, self, cArg),
+                                                .rAppend => try setFileOperator(.rAppend, self, cArg),
+                                                else => unreachable,
+                                            },
                                             else => unreachable,
                                         }
 
@@ -215,7 +231,10 @@ pub const CommandQueue = struct {
                                         //       This is the most "clean" way to do this.
                                         if (thirdToken) |cThirdToken| {
                                             switch (cThirdToken) {
-                                                .seperator => {},
+                                                .operator => |thirdOperator| switch (thirdOperator) {
+                                                    .seperator => {},
+                                                    else => return error.SyntaxError,
+                                                },
                                                 else => return error.SyntaxError,
                                             }
                                         }
@@ -253,17 +272,18 @@ pub const CommandQueue = struct {
 
     pub fn setArg(self: *CommandQueue, operator: Operator) !void {
         if (self.commands) |cArgs| {
-            try cArgs.items[cArgs.items.len].setOperator(operator);
+            try cArgs.items[cArgs.items.len - 1].setOperator(operator);
         } else {
             return error.NoArgs;
         }
     }
 
     pub fn newArg(self: *CommandQueue) !void {
-        if (self.commands) |cCommands| {
-            try cCommands.items.append(Args.init(self.allocator));
+        if (self.commands) |*cCommands| {
+            try cCommands.append(Args.init(self.allocator));
         } else {
-            const list = std.ArrayList(Args).init();
+            var list = std.ArrayList(Args).init(self.allocator);
+            try list.append(Args.init(self.allocator));
             self.commands = list;
         }
     }

@@ -1,10 +1,8 @@
 const std = @import("std");
 const Args = @import("args.zig").Args;
 const CommandQueue = @import("commandQueue.zig").CommandQueue;
-const Operator = @import("commandQueue.zig").Operator;
-const Command = @import("commandQueue.zig").Command;
+const Operator = @import("args.zig").Operator;
 const Environ = @import("environ.zig").Environ;
-const ArrayHelper = @import("arrayHelper.zig");
 
 const Builtins = enum {
     exit,
@@ -28,6 +26,7 @@ const ExecuteError = error{
     MissingFileName,
     MissingFilesNames,
     FileDidNotExist,
+    OutOfMemory,
 };
 
 pub const Executer = struct {
@@ -53,16 +52,15 @@ pub const Executer = struct {
     }
 
     pub fn executeCommands(self: *const Executer, commandQueue: *const CommandQueue, environ: *const Environ) ExecuteError!void {
-        var p: [2]std.posix.fd_t = .{ 0, 0 };
+        var pipe: [2]std.posix.fd_t = .{ 0, 0 };
         var pid: std.posix.pid_t = 0;
-        var fd_in: std.posix.fd_t = std.posix.STDIN_FILENO;
 
         if (commandQueue.commands) |cCommands| {
             var i: u64 = 0;
 
             while (i < cCommands.items.len) : (i += 1) {
                 const args: Args = cCommands.items[i];
-                const lastOperator: Operator = if (i > 0) cCommands.items[i].operator else Operator{ .none = void };
+                const lastOperator: Operator = if (i > 0) cCommands.items[i - 1].operator else Operator.none;
 
                 // NOTE: Bug allert!
                 std.debug.assert(args.args.items.len != 0);
@@ -73,7 +71,7 @@ pub const Executer = struct {
                             return error.Exit;
                         },
                         .cd => {
-                            if (args.len != 2) return error.InvalidPath;
+                            if (args.args.items.len != 2) return error.InvalidPath;
                             std.posix.chdir(args.args.items[1]) catch return error.ChangeDirError;
 
                             continue;
@@ -85,20 +83,25 @@ pub const Executer = struct {
                     }
                 }
 
-                if (args.operator == .pipe or lastOperator == .pipe) {
-                    p = std.posix.pipe() catch return error.PipeFailed;
+                if (args.operator == .pipe) {
+                    pipe = std.posix.pipe() catch return error.PipeFailed;
                 }
 
                 pid = @intCast(std.posix.fork() catch return error.ForkFailed);
 
                 if (pid == 0) {
                     if (lastOperator == .pipe) {
-                        std.posix.dup2(fd_in, std.posix.STDIN_FILENO) catch return error.Dup2Failed;
+                        std.posix.dup2(pipe[0], std.posix.STDIN_FILENO) catch return error.Dup2Failed;
+                    }
+
+                    if (args.operator == .pipe or lastOperator == .pipe) {
+                        std.posix.close(pipe[0]); //close the output end
                     }
 
                     switch (args.operator) {
                         .pipe => {
-                            std.posix.dup2(p[1], std.posix.STDOUT_FILENO) catch return error.Dup2Failed;
+                            std.posix.dup2(pipe[1], std.posix.STDOUT_FILENO) catch return error.Dup2Failed;
+                            std.posix.close(pipe[1]);
                         },
                         // Look at this sexy code, god damn.
                         // The token parsing was worth it!
@@ -123,10 +126,6 @@ pub const Executer = struct {
                         else => {},
                     }
 
-                    if (args.operator == .pipe or lastOperator == .pipe) {
-                        std.posix.close(p[0]);
-                    }
-
                     const cArgs = try args.getCArgs();
                     defer cArgs.deinit();
 
@@ -141,9 +140,10 @@ pub const Executer = struct {
                         wait = std.posix.waitpid(pid, std.posix.W.UNTRACED);
                     }
 
-                    if (args.operator == .pipe or lastOperator == .pipe) {
-                        std.posix.close(p[1]);
-                        fd_in = p[0];
+                    if (args.operator == .pipe) {
+                        std.posix.close(pipe[1]);
+                    } else if (lastOperator == .pipe) {
+                        std.posix.close(pipe[0]);
                     }
                 }
             }

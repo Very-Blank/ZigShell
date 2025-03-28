@@ -60,6 +60,10 @@ pub const InputReader = struct {
             break;
         }
 
+        if (len == 0) {
+            return error.NoInput;
+        }
+
         if (len != buffer.len) {
             const newBuffer = try self.allocator.alloc(u8, len);
             for (0..len) |i| {
