@@ -45,10 +45,10 @@ pub fn main() !void {
         commandQueue.parse(if (inputReader.buffer) |cBuffer| cBuffer else {
             inputReader.clear();
             commandQueue.deinit();
-            _ = try stdout.write("Expected input, but there was none.");
+            _ = try stdout.write("Expected input, but there was none.\n");
             continue;
         }) catch {
-            _ = try stdout.write("SyntaxError");
+            _ = try stdout.write("SyntaxError\n");
         };
 
         //args.print();
