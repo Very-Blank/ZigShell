@@ -49,12 +49,13 @@ pub const Executer = struct {
         var pipe: [2]std.posix.fd_t = .{ 0, 0 };
         var pid: std.posix.pid_t = 0;
 
+        // FIXME: REMOVE bad nulls that don't need be! Like commands being null why!?
         if (commandQueue.commands) |cCommands| {
             var i: u64 = 0;
 
-            while (i < cCommands.items.len) : (i += 1) {
-                const args: Args = cCommands.items[i];
-                const lastOperator: Operator = if (i > 0) cCommands.items[i - 1].operator else Operator.none;
+            while (i < cCommands.len) : (i += 1) {
+                const args: Args = cCommands[i];
+                const lastOperator: Operator = if (i > 0) cCommands[i - 1].operator else Operator.none;
 
                 // NOTE: Bug allert!
                 std.debug.assert(args.args.items.len != 0);

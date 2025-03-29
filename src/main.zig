@@ -14,7 +14,6 @@ pub fn write(self: std.fs.File, bytes: []const u8) std.posix.WriteError!usize {
 
 pub fn main() !void {
     const allocator: std.mem.Allocator, const is_debug: bool = gpa: {
-        if (builtin.target.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
             .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
@@ -25,23 +24,19 @@ pub fn main() !void {
         std.debug.print("Debug allocator: {any}\n", .{debug_allocator.deinit()});
     };
 
-    // const stdout: std.io.AnyWriter() = std.io.getStdIn().writer();
-
-    // const stdout: std.io.AnyWriter = std.io.GenericWriter(std.io.getStdIn(), std.posix.WriteError, write);
-
     var inputReader = InputReader.init(allocator);
     defer inputReader.clear();
 
     var commandQueue: CommandQueue = CommandQueue.init(allocator);
     defer commandQueue.deinit();
 
+    // Helper function to get the enviroment variables to C strings
     const environ: Environ = try Environ.init(std.os.environ, allocator);
     defer environ.deinit();
 
     var executer: Executer = try Executer.init(allocator);
     defer executer.deinit();
 
-    // var delimeter: u8 = '\n';
     const stdin: stdinWriter.StdinWriter = stdinWriter.getWriter();
 
     while (true) {
@@ -53,7 +48,9 @@ pub fn main() !void {
         // NOTE: Unreachable because it's an error for the InputReader to be empty,
         //       which is catched above so this is save.
         commandQueue.parse(if (inputReader.buffer) |cBuffer| cBuffer else unreachable) catch {
-            _ = try stdin.write("SyntaxError, while parsing input.\n");
+            _ = try stdin.write("SyntaxError while parsing input.\n");
+            inputReader.clear();
+            continue;
         };
 
         executer.executeCommands(&commandQueue, &environ, &stdin) catch |err| {

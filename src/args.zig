@@ -74,9 +74,9 @@ pub const CArgs = struct {
     allocator: std.mem.Allocator,
 
     pub fn init(args: *const Args) !CArgs {
+        std.debug.assert(args.args.items.len > 0);
+
         const file = try args.allocator.alloc(u8, args.args.items[0].len + 1);
-        // NOTE: that at least args.args.items[0] is guaranteed.
-        // If this ever panics we have a bad bug in tokenizer!
         @memcpy(file[0 .. file.len - 1], args.args.items[0]);
 
         file[file.len - 1] = 0;

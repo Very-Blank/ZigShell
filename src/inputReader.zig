@@ -1,6 +1,7 @@
 const std = @import("std");
 
 pub const InputReader = struct {
+    // FIXME: This should never be null!
     buffer: ?[]u8,
     allocator: std.mem.Allocator,
 
@@ -11,7 +12,8 @@ pub const InputReader = struct {
         };
     }
 
-    pub fn read(self: *InputReader, delimiter: u8) !void {
+    // FIXME: Trash code!
+    pub fn read(self: *InputReader, delimiter: u8) ![]u8 {
         var start: u64 = 0;
         var len: u64 = 0;
 
@@ -74,8 +76,7 @@ pub const InputReader = struct {
             buffer = newBuffer;
         }
 
-        if (self.buffer) |cBuffer| self.allocator.free(cBuffer);
-        self.buffer = buffer;
+        return buffer;
     }
 
     pub fn clear(self: *InputReader) void {

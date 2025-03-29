@@ -19,7 +19,8 @@ const State = enum {
 };
 
 pub const CommandQueue = struct {
-    commands: ?std.ArrayList(Args),
+    // FIXME: NEVER SHOULD BE NULL
+    commands: ?[]Args,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) CommandQueue {
@@ -28,27 +29,28 @@ pub const CommandQueue = struct {
 
     pub fn deinit(self: *CommandQueue) void {
         if (self.commands) |cCommands| {
-            for (cCommands.items) |cArg| {
+            for (cCommands) |cArg| {
                 cArg.deinit();
             }
 
-            cCommands.deinit();
+            self.allocator.free(cCommands);
         }
 
         self.commands = null;
     }
-
+    /// Char array -> Token array -> Args array
     pub fn parse(self: *CommandQueue, buffer: []u8) !void {
-        const tokens = try self.tokenize(buffer);
+        const tokens: []Token = try tokenize(buffer, self.allocator);
         defer self.allocator.free(tokens);
-        try self.parseTokens(tokens);
+        const args: []Args = try parseTokens(tokens, self.allocator);
+        self.commands = args;
     }
 
     // Made this because it was too hard to just parse strings.
     // This will be slower, but much easier to define safe behaviour.
     /// Tokens will have pointers to buffer!
-    pub fn tokenize(self: *CommandQueue, buffer: []u8) ![]Token {
-        var tokens = std.ArrayList(Token).init(self.allocator);
+    pub fn tokenize(buffer: []u8, allocator: std.mem.Allocator) ![]Token {
+        var tokens = std.ArrayList(Token).init(allocator);
         errdefer tokens.deinit();
 
         var i: u64 = 0;
@@ -152,17 +154,14 @@ pub const CommandQueue = struct {
         return tokens.toOwnedSlice();
     }
 
-    pub fn parseTokens(self: *CommandQueue, tokens: []Token) !void {
-        // If any error happens, commands are invalid!
-        errdefer {
-            self.deinit();
-        }
+    pub fn parseTokens(tokens: []Token, allocator: std.mem.Allocator) ![]Args {
+        var args: std.ArrayList(Args) = std.ArrayList(Args).init(allocator);
+        errdefer args.deinit();
 
         var i: u64 = 0;
         switch (tokens[i]) {
             .arg => |arg| {
-                try self.newArg();
-                try self.addArg(arg);
+                try newArgsWithArg(&args, arg);
                 i += 1;
             },
             else => return error.SyntaxError,
@@ -175,7 +174,7 @@ pub const CommandQueue = struct {
 
             switch (currentToken) {
                 .arg => |arg| {
-                    try self.addArg(arg);
+                    try addArg(&args, arg);
                 },
                 .operator => |operator| {
                     switch (operator) {
@@ -185,8 +184,7 @@ pub const CommandQueue = struct {
                             if (nextToken) |cNextToken| {
                                 switch (cNextToken) {
                                     .arg => |arg| {
-                                        try self.newArg();
-                                        try self.addArg(arg);
+                                        try newArgsWithArg(&args, arg);
 
                                         i += 1;
                                         continue;
@@ -201,9 +199,8 @@ pub const CommandQueue = struct {
                             if (nextToken) |cNextToken| {
                                 switch (cNextToken) {
                                     .arg => |arg| {
-                                        try self.setArg(Operator.pipe);
-                                        try self.newArg();
-                                        try self.addArg(arg);
+                                        try setArg(&args, Operator.pipe);
+                                        try newArgsWithArg(&args, arg);
 
                                         i += 1;
                                         continue;
@@ -220,8 +217,8 @@ pub const CommandQueue = struct {
                                     .arg => |cArg| {
                                         switch (currentToken) {
                                             .operator => |nextOperator| switch (nextOperator) {
-                                                .rOverride => try setFileOperator(.rOverride, self, cArg),
-                                                .rAppend => try setFileOperator(.rAppend, self, cArg),
+                                                .rOverride => try setFileOperator(.rOverride, &args, cArg),
+                                                .rAppend => try setFileOperator(.rAppend, &args, cArg),
                                                 else => unreachable,
                                             },
                                             else => unreachable,
@@ -253,46 +250,37 @@ pub const CommandQueue = struct {
                 },
             }
         }
+
+        return args.toOwnedSlice();
     }
 
-    pub fn setFileOperator(comptime T: OperatorType, self: *CommandQueue, arg: []u8) !void {
-        const value = try self.allocator.alloc(u8, arg.len);
+    pub fn setFileOperator(comptime T: OperatorType, args: *std.ArrayList(Args), arg: []u8) !void {
+        const value = try args.allocator.alloc(u8, arg.len);
         @memcpy(value, arg);
-        errdefer self.allocator.free(value);
+        errdefer args.allocator.free(value);
         switch (T) {
             .rOverride => {
-                try self.setArg(Operator{ .rOverride = value });
+                try setArg(args, Operator{ .rOverride = value });
             },
             .rAppend => {
-                try self.setArg(Operator{ .rAppend = value });
+                try setArg(args, Operator{ .rAppend = value });
             },
             else => @compileError("OperatorType " ++ @typeName(T) ++ " is not supported"),
         }
     }
 
-    pub fn setArg(self: *CommandQueue, operator: Operator) !void {
-        if (self.commands) |cArgs| {
-            try cArgs.items[cArgs.items.len - 1].setOperator(operator);
-        } else {
-            return error.NoArgs;
-        }
+    pub fn setArg(args: *std.ArrayList(Args), operator: Operator) !void {
+        std.debug.assert(args.items.len > 0);
+        try args.items[args.items.len - 1].setOperator(operator);
     }
 
-    pub fn newArg(self: *CommandQueue) !void {
-        if (self.commands) |*cCommands| {
-            try cCommands.append(Args.init(self.allocator));
-        } else {
-            var list = std.ArrayList(Args).init(self.allocator);
-            try list.append(Args.init(self.allocator));
-            self.commands = list;
-        }
+    pub fn newArgsWithArg(args: *std.ArrayList(Args), arg: []u8) !void {
+        try args.append(Args.init(args.allocator));
+        try addArg(args, arg);
     }
 
-    pub fn addArg(self: *CommandQueue, arg: []u8) !void {
-        if (self.commands) |cCommands| {
-            try cCommands.items[cCommands.items.len - 1].add(arg);
-        } else {
-            return error.NoCommands;
-        }
+    pub fn addArg(args: *std.ArrayList(Args), arg: []u8) !void {
+        std.debug.assert(args.items.len > 0);
+        try args.items[args.items.len - 1].add(arg);
     }
 };
