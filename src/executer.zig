@@ -3,6 +3,7 @@ const Args = @import("args.zig").Args;
 const CommandQueue = @import("commandQueue.zig").CommandQueue;
 const Operator = @import("args.zig").Operator;
 const Environ = @import("environ.zig").Environ;
+const stdinWriter = @import("stdinWriter.zig");
 
 const Builtins = enum {
     exit,
@@ -13,20 +14,13 @@ const Builtins = enum {
 const ExecuteError = error{
     Exit,
     ChildExit,
-    ArgsNull,
-    ArgsTooShort,
-    NoCommand,
     InvalidPath,
-    PathWasNull,
     ForkFailed,
-    ChangeDirError,
     FailedToOpenFile,
     PipeFailed,
     Dup2Failed,
-    MissingFileName,
-    MissingFilesNames,
-    FileDidNotExist,
     OutOfMemory,
+    PrintFailed,
 };
 
 pub const Executer = struct {
@@ -51,7 +45,7 @@ pub const Executer = struct {
         self.hashmap.deinit();
     }
 
-    pub fn executeCommands(self: *const Executer, commandQueue: *const CommandQueue, environ: *const Environ) ExecuteError!void {
+    pub fn executeCommands(self: *const Executer, commandQueue: *const CommandQueue, environ: *const Environ, stdin: *const stdinWriter.StdinWriter) ExecuteError!void {
         var pipe: [2]std.posix.fd_t = .{ 0, 0 };
         var pid: std.posix.pid_t = 0;
 
@@ -68,30 +62,43 @@ pub const Executer = struct {
                 if (self.hashmap.get(args.args.items[0])) |builtin| {
                     switch (builtin) {
                         .exit => {
-                            return error.Exit;
+                            _ = stdin.write("Bye :(\n") catch return ExecuteError.PrintFailed;
+                            return ExecuteError.Exit;
                         },
                         .cd => {
-                            if (args.args.items.len != 2) return error.InvalidPath;
-                            std.posix.chdir(args.args.items[1]) catch return error.ChangeDirError;
+                            if (args.args.items.len != 2) {
+                                _ = stdin.write("cd: Supplied too many args or too few args\n") catch return ExecuteError.PrintFailed;
+                                return ExecuteError.InvalidPath;
+                            }
+                            std.posix.chdir(args.args.items[1]) catch {
+                                _ = stdin.write("cd: Chdir returned an error, invalid path?\n") catch return ExecuteError.PrintFailed;
+                                return ExecuteError.InvalidPath;
+                            };
 
                             continue;
                         },
                         .help => {
-                            // FIXME: add some help info
+                            _ = stdin.write(
+                                \\Help {
+                                \\  Usage: path arg1 arg2 ...
+                                \\  Builtins: exit, cd and help.
+                                \\  SIGINT: isn't handled yet, so it will also close the shell.
+                                \\}
+                            ++ "\n") catch return ExecuteError.PrintFailed;
                             continue;
                         },
                     }
                 }
 
                 if (args.operator == .pipe) {
-                    pipe = std.posix.pipe() catch return error.PipeFailed;
+                    pipe = std.posix.pipe() catch return ExecuteError.PipeFailed;
                 }
 
-                pid = @intCast(std.posix.fork() catch return error.ForkFailed);
+                pid = @intCast(std.posix.fork() catch return ExecuteError.ForkFailed);
 
                 if (pid == 0) {
                     if (lastOperator == .pipe) {
-                        std.posix.dup2(pipe[0], std.posix.STDIN_FILENO) catch return error.Dup2Failed;
+                        std.posix.dup2(pipe[0], std.posix.STDIN_FILENO) catch return ExecuteError.Dup2Failed;
                     }
 
                     if (args.operator == .pipe or lastOperator == .pipe) {
@@ -100,28 +107,28 @@ pub const Executer = struct {
 
                     switch (args.operator) {
                         .pipe => {
-                            std.posix.dup2(pipe[1], std.posix.STDOUT_FILENO) catch return error.Dup2Failed;
+                            std.posix.dup2(pipe[1], std.posix.STDOUT_FILENO) catch return ExecuteError.Dup2Failed;
                             std.posix.close(pipe[1]);
                         },
                         // Look at this sexy code, god damn.
                         // The token parsing was worth it!
                         // No guessing if we have a file!
                         .rOverride => |filename| {
-                            const file = std.fs.cwd().createFile(filename, .{}) catch return error.FailedToOpenFile;
+                            const file = std.fs.cwd().createFile(filename, .{}) catch return ExecuteError.FailedToOpenFile;
 
                             std.posix.dup2(
                                 file.handle,
                                 std.posix.STDOUT_FILENO,
-                            ) catch return error.Dup2Failed;
+                            ) catch return ExecuteError.Dup2Failed;
                         },
                         // FIXME: change this so it actually appends
                         .rAppend => |filename| {
-                            const file = std.fs.cwd().createFile(filename, .{}) catch return error.FileDidNotExist;
+                            const file = std.fs.cwd().createFile(filename, .{}) catch return ExecuteError.FailedToOpenFile;
 
                             std.posix.dup2(
                                 file.handle,
                                 std.posix.STDOUT_FILENO,
-                            ) catch return error.Dup2Failed;
+                            ) catch return ExecuteError.Dup2Failed;
                         },
                         else => {},
                     }
@@ -130,10 +137,11 @@ pub const Executer = struct {
                     defer cArgs.deinit();
 
                     const errors = std.posix.execvpeZ(cArgs.file, cArgs.argv, environ.variables);
-                    std.debug.print("{any}\n", .{errors});
-                    return error.ChildExit;
+                    _ = stdin.print("Execute error: {any}\n", .{errors}) catch return ExecuteError.PrintFailed;
+
+                    return ExecuteError.ChildExit;
                 } else if (pid < 0) {
-                    return error.ForkFailed;
+                    return ExecuteError.ForkFailed;
                 } else {
                     var wait: std.posix.WaitPidResult = std.posix.waitpid(pid, std.posix.W.UNTRACED);
                     while (!std.posix.W.IFEXITED(wait.status) and !std.posix.W.IFSIGNALED(wait.status)) {
