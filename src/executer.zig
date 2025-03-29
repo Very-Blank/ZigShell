@@ -121,9 +121,9 @@ pub const Executer = struct {
                                 std.posix.STDOUT_FILENO,
                             ) catch return ExecuteError.Dup2Failed;
                         },
-                        // FIXME: change this so it actually appends
                         .rAppend => |filename| {
-                            const file = std.fs.cwd().createFile(filename, .{}) catch return ExecuteError.FailedToOpenFile;
+                            const file = std.fs.cwd().openFile(filename, .{ .mode = .write_only, .lock = .none }) catch return ExecuteError.FailedToOpenFile;
+                            file.seekTo(file.getEndPos() catch return ExecuteError.FailedToOpenFile) catch return ExecuteError.FailedToOpenFile;
 
                             std.posix.dup2(
                                 file.handle,
