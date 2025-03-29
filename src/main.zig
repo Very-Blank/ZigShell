@@ -1,10 +1,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const CommandQueue = @import("commandQueue.zig").CommandQueue;
+const ArgsQueue = @import("argsQueue.zig").ArgsQueue;
+
 const InputReader = @import("inputReader.zig").InputReader;
 const Environ = @import("environ.zig").Environ;
 const Executer = @import("executer.zig").Executer;
 const stdinWriter = @import("stdinWriter.zig");
+const Args = @import("args.zig").Args;
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
@@ -24,11 +26,8 @@ pub fn main() !void {
         std.debug.print("Debug allocator: {any}\n", .{debug_allocator.deinit()});
     };
 
-    var inputReader = InputReader.init(allocator);
-    defer inputReader.clear();
-
-    var commandQueue: CommandQueue = CommandQueue.init(allocator);
-    defer commandQueue.deinit();
+    const inputReader = InputReader.init(allocator);
+    const argsQueue = ArgsQueue.init(allocator);
 
     // Helper function to get the enviroment variables to C strings
     const environ: Environ = try Environ.init(std.os.environ, allocator);
@@ -41,19 +40,24 @@ pub fn main() !void {
 
     while (true) {
         _ = try stdin.write(" > ");
-        inputReader.read('\n') catch {
+        const buffer: []u8 = inputReader.read('\n') catch {
             continue;
         };
+        defer allocator.free(buffer);
 
-        // NOTE: Unreachable because it's an error for the InputReader to be empty,
-        //       which is catched above so this is save.
-        commandQueue.parse(if (inputReader.buffer) |cBuffer| cBuffer else unreachable) catch {
+        const args: []Args = argsQueue.parse(buffer) catch {
             _ = try stdin.write("SyntaxError while parsing input.\n");
-            inputReader.clear();
             continue;
         };
+        defer {
+            for (args) |arg| {
+                arg.deinit();
+            }
 
-        executer.executeCommands(&commandQueue, &environ, &stdin) catch |err| {
+            allocator.free(args);
+        }
+
+        executer.executeArgs(args, &environ, &stdin) catch |err| {
             switch (err) {
                 error.Exit, error.ChildExit => break,
                 // These errors are okay to happen
@@ -61,8 +65,5 @@ pub fn main() !void {
                 else => return err,
             }
         };
-
-        inputReader.clear();
-        commandQueue.deinit();
     }
 }

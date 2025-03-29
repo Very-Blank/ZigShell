@@ -65,6 +65,7 @@ pub const Args = struct {
     }
 };
 
+// I want to cry looking at this code :<
 pub const CArgs = struct {
     file: [*:0]u8,
     fileLen: u64,
@@ -99,7 +100,6 @@ pub const CArgs = struct {
             .allocator = args.allocator,
         };
     }
-
     pub fn deinit(self: *const CArgs) void {
         for (0..self.argvLen) |i| {
             if (self.argv[i]) |cArg| {

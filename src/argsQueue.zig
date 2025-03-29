@@ -18,16 +18,14 @@ const State = enum {
     quote,
 };
 
-pub const CommandQueue = struct {
-    // FIXME: NEVER SHOULD BE NULL
-    commands: ?[]Args,
+pub const ArgsQueue = struct {
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: std.mem.Allocator) CommandQueue {
-        return .{ .commands = null, .allocator = allocator };
+    pub fn init(allocator: std.mem.Allocator) ArgsQueue {
+        return .{ .allocator = allocator };
     }
 
-    pub fn deinit(self: *CommandQueue) void {
+    pub fn deinit(self: *const ArgsQueue) void {
         if (self.commands) |cCommands| {
             for (cCommands) |cArg| {
                 cArg.deinit();
@@ -38,12 +36,12 @@ pub const CommandQueue = struct {
 
         self.commands = null;
     }
+
     /// Char array -> Token array -> Args array
-    pub fn parse(self: *CommandQueue, buffer: []u8) !void {
+    pub fn parse(self: *const ArgsQueue, buffer: []u8) ![]Args {
         const tokens: []Token = try tokenize(buffer, self.allocator);
         defer self.allocator.free(tokens);
-        const args: []Args = try parseTokens(tokens, self.allocator);
-        self.commands = args;
+        return try parseTokens(tokens, self.allocator);
     }
 
     // Made this because it was too hard to just parse strings.

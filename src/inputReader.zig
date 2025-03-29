@@ -1,33 +1,20 @@
 const std = @import("std");
 
 pub const InputReader = struct {
-    // FIXME: This should never be null!
-    buffer: ?[]u8,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) InputReader {
         return .{
-            .buffer = null,
             .allocator = allocator,
         };
     }
 
-    // FIXME: Trash code!
-    pub fn read(self: *InputReader, delimiter: u8) ![]u8 {
+    /// Caller owns the memory
+    pub fn read(self: *const InputReader, delimiter: u8) ![]u8 {
         var start: u64 = 0;
         var len: u64 = 0;
 
-        var buffer: []u8 = undefined;
-
-        if (self.buffer) |cBuffer| {
-            start = cBuffer.len;
-            const newBuffer = try self.allocator.alloc(u8, cBuffer.len + 50);
-            @memcpy(newBuffer[0..cBuffer.len], cBuffer);
-
-            buffer = newBuffer;
-        } else {
-            buffer = try self.allocator.alloc(u8, 50);
-        }
+        var buffer: []u8 = try self.allocator.alloc(u8, 50);
 
         errdefer self.allocator.free(buffer);
 
@@ -77,12 +64,5 @@ pub const InputReader = struct {
         }
 
         return buffer;
-    }
-
-    pub fn clear(self: *InputReader) void {
-        if (self.buffer) |cBuffer| {
-            self.allocator.free(cBuffer);
-            self.buffer = null;
-        }
     }
 };
