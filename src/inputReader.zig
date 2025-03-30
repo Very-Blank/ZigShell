@@ -14,7 +14,7 @@ pub const InputReader = struct {
         var start: u64 = 0;
         var len: u64 = 0;
 
-        var buffer: []u8 = try self.allocator.alloc(u8, 50);
+        var buffer: []u8 = try self.allocator.alloc(u8, 64);
 
         errdefer self.allocator.free(buffer);
 
@@ -32,7 +32,7 @@ pub const InputReader = struct {
                         start = buffer.len;
                         len = buffer.len;
 
-                        const newBuffer = try self.allocator.alloc(u8, buffer.len + 50);
+                        const newBuffer = try self.allocator.alloc(u8, buffer.len * 2);
                         @memcpy(newBuffer[0..buffer.len], buffer);
 
                         self.allocator.free(buffer);
