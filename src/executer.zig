@@ -46,6 +46,7 @@ pub const Executer = struct {
 
     pub fn executeArgs(self: *const Executer, argsQueue: []Args, environ: *const Environ, stdin: *const stdinWriter.StdinWriter) ExecuteError!void {
         var pipe: [2]std.posix.fd_t = .{ 0, 0 };
+        var old_pipe_out: std.posix.fd_t = 0;
         var pid: std.posix.pid_t = 0;
 
         var i: u64 = 0;
@@ -96,10 +97,11 @@ pub const Executer = struct {
 
             if (pid == 0) {
                 if (lastOperator == .pipe) {
-                    std.posix.dup2(pipe[0], std.posix.STDIN_FILENO) catch return ExecuteError.Dup2Failed;
+                    std.posix.dup2(old_pipe_out, std.posix.STDIN_FILENO) catch return ExecuteError.Dup2Failed;
+                    std.posix.close(old_pipe_out);
                 }
 
-                if (args.operator == .pipe or lastOperator == .pipe) {
+                if (args.operator == .pipe) {
                     std.posix.close(pipe[0]); //close the output end
                 }
 
@@ -113,6 +115,7 @@ pub const Executer = struct {
                     // No guessing if we have a file!
                     .rOverride => |filename| {
                         const file = std.fs.cwd().createFile(filename, .{}) catch return ExecuteError.FailedToOpenFile;
+                        defer file.close();
 
                         std.posix.dup2(
                             file.handle,
@@ -121,6 +124,7 @@ pub const Executer = struct {
                     },
                     .rAppend => |filename| {
                         const file = std.fs.cwd().openFile(filename, .{ .mode = .write_only, .lock = .none }) catch return ExecuteError.FailedToOpenFile;
+                        defer file.close();
                         file.seekTo(file.getEndPos() catch return ExecuteError.FailedToOpenFile) catch return ExecuteError.FailedToOpenFile;
 
                         std.posix.dup2(
@@ -148,8 +152,9 @@ pub const Executer = struct {
 
                 if (args.operator == .pipe) {
                     std.posix.close(pipe[1]);
+                    old_pipe_out = pipe[0];
                 } else if (lastOperator == .pipe) {
-                    std.posix.close(pipe[0]);
+                    std.posix.close(old_pipe_out);
                 }
             }
         }
