@@ -154,7 +154,12 @@ pub const ArgsQueue = struct {
 
     pub fn parseTokens(tokens: []Token, allocator: std.mem.Allocator) ![]Args {
         var args: std.ArrayList(Args) = std.ArrayList(Args).init(allocator);
-        errdefer args.deinit();
+        defer {
+            for (args.items) |arg| {
+                arg.deinit();
+            }
+            args.deinit();
+        }
 
         var i: u64 = 0;
         switch (tokens[i]) {
